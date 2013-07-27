@@ -36,18 +36,18 @@ class TrackEditorMainWindow(MainWindow):
         main_layout = QtGui.QHBoxLayout(main_widget)
         
         self.graph = TrackGraph(5, 5)
-        self.table = CoordsTable(headers=['Time', 'X', 'Y', 'Z'])
+        # self.table = CoordsTable(headers=['Time', 'X', 'Y', 'Z'])
         splitter = QtGui.QSplitter(main_widget)
         splitter.addWidget(self.graph)
-        splitter.addWidget(self.table)
+        # splitter.addWidget(self.table)
         
         main_layout.addWidget(splitter)
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
         
         self.graph.clear()
-        self.graph.link_to_coordstable(self.table)
-        self.table.link_to_trackgraph(self.graph)
+        # self.graph.link_to_coordstable(self.table)
+        # self.table.link_to_trackgraph(self.graph)
         
         self.setGeometry(400, 50, 900, 650) # debug
         # self.showMaximized()
@@ -67,7 +67,7 @@ class TrackEditorMainWindow(MainWindow):
         self.graph.coords = arr
         self.graph.plot()
         logging.debug('Graphing %s' % fn)
-        self.table.refresh_from_linked_trackgraph()
+        # self.table.refresh_from_linked_trackgraph()
    
     def slot_exit(self):
         self.close()
@@ -147,6 +147,8 @@ class TrackGraph(QtGui.QWidget):
             self.canvas.fig.delaxes(self.ax)
         self.ax = self.canvas.fig.add_axes([0, 0, 1, 1], aspect=True)
         self.ax.axis('off')
+        self.ax.set_aspect(aspect='equal', adjustable='datalim')
+        #self.ax.set_autoscale_on(False)
         
     def draw(self):
         self.canvas.draw()
