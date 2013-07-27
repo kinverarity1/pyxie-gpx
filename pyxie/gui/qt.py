@@ -1,12 +1,8 @@
-'''General Qt classes to be inherited.'''
 from PyQt4 import QtGui, QtCore
 from PyQt4.QtCore import Qt
 
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-
-
 
 class ActionHandler(object):
     '''A base class for Qt widgets, to make it easy to handle adding actions.
@@ -41,6 +37,7 @@ class ActionHandler(object):
             getattr(action, signal).connect(slot)
         return action
     
+
     def add_actions(self, target, actions):
         '''Add actions to a target, like a ToolBar or Menu.
 
@@ -74,7 +71,7 @@ class MainWindow(ActionHandler, QtGui.QMainWindow):
 
         
 
-class MatplotlibCanvas(FigureCanvas):
+class MplCanvas(FigureCanvas):
     """Ultimately, this is a QWidget (as well as a FigureCanvasAgg, etc.)."""
     def __init__(self, parent=None, width=2, height=2, dpi=100, frameon=True):
         self.fig = Figure(figsize=(width, height), dpi=dpi, frameon=frameon)
@@ -87,3 +84,7 @@ class MatplotlibCanvas(FigureCanvas):
         FigureCanvas.updateGeometry(self)
                 
                 
+
+                
+def debug(item):
+    print item.column(), item.row(), item.text()
