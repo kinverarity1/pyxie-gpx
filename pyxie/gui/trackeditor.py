@@ -17,20 +17,30 @@ from pyxie.gui.qt import QtGui, QtCore, Qt, MainWindow, MplCanvas
 
 program_name = 'Pyxie Track Editor'
 program_version = '0.1'
+callbacks = [('link_location', 'Link location on map and graph', True)]
 
 
         
 class TrackEditorMainWindow(MainWindow):
-    def __init__(self, *args, **kwargs):
-        logging.debug('args=%s kwargs=%s' % (args, kwargs))
-        MainWindow.__init__(self, *args, **kwargs)
+    def __init__(self, split_direction='horizontal', track_fn=None):
+        MainWindow.__init__(self)
+        logging.debug('__init__ split_direction=%s track_fn=%s' % (
+                split_direction, track_fn))
+        self.track_fn = track_fn
         self.dialogs = {}
         self.callbacks = {}
-        self.init_ui()
+        self.split_direction = split_direction
+        self.init_ui(split_direction=split_direction)
+        if track_fn:
+            self.open_track(track_fn)
+                
         
-    def init_ui(self):
+    def init_ui(self, split_direction='horizontal'):
+        self.split_direction = split_direction
+            
         open_track = self.create_action(text='Open track...', shortcut='Ctrl+O', slot=self.slot_open_track)
         show_callbacks_dialog = self.create_action(text='Enable/disable graph features...', slot=self.slot_show_callbacks_dialog)
+        set_gui_style = self.create_action(text='Flip orientation', slot=self.slot_flip_gui_direction)
         exit = self.create_action(text='E&xit', shortcut='Alt+F4', slot=self.slot_exit)
         about = self.create_action(text='&About...', shortcut='F1', slot=self.slot_about)
         menubar = self.menuBar()
@@ -38,7 +48,7 @@ class TrackEditorMainWindow(MainWindow):
         view_menu = menubar.addMenu('&View')
         help_menu = menubar.addMenu('&Help')
         self.add_actions(file_menu, [open_track, exit])
-        self.add_actions(view_menu, [show_callbacks_dialog])
+        self.add_actions(view_menu, [show_callbacks_dialog, set_gui_style])
         self.add_actions(help_menu, [about])
         
         main_widget = QtGui.QWidget(self)
@@ -47,7 +57,10 @@ class TrackEditorMainWindow(MainWindow):
         self.map = TrackMap(5, 5)
         self.graph = TrackGraph(5, 5)
         splitter = QtGui.QSplitter(main_widget)
-        splitter.setOrientation(Qt.Vertical)
+        if split_direction == 'horizontal':
+            splitter.setOrientation(Qt.Vertical)
+        elif split_direction == 'vertical':
+            splitter.setOrientation(Qt.Horizontal)
         splitter.addWidget(self.map)
         splitter.addWidget(self.graph)
         
@@ -69,18 +82,35 @@ class TrackEditorMainWindow(MainWindow):
         self.dialogs['callbacks'].show()
         self.dialogs['callbacks'].activateWindow()
    
+    def slot_flip_gui_direction(self):
+        logging.debug('flipping gui direction')
+        if self.split_direction == 'horizontal':
+            self.close()
+            self.__init__(split_direction='vertical', track_fn=self.track_fn)
+        elif self.split_direction == 'vertical':
+            self.close()
+            self.__init__(split_direction='horizontal', track_fn=self.track_fn)
+   
     def slot_open_track(self):
+        logging.debug('Asking for track fn')
         dialog = QtGui.QFileDialog()
         dialog.setFileMode(QtGui.QFileDialog.ExistingFile)
         fn = dialog.getOpenFileName(self,
                 'Import track file', os.getcwd(),
                 'GPS Exchange Format (*.gpx)'
                 )
+        return self.open_track(fn)
+        
+    def open_track(self, fn):
+        logging.debug('Opening track_fn' % fn)
         if not os.path.isfile(fn):
             return
-        arr = io.read_gpx(fn)
-        logging.info('Read %d points from %s' % (arr.shape[0], fn))
+        self.track_fn = fn
+        self.coords = io.read_gpx(fn)
+        logging.info('Read %d points from %s' % (self.coords.shape[0], fn))
+        self.refresh()
         
+    def refresh(self):
         for callback in self.callbacks.values():
             callback.disconnect()
         self.callbacks.clear()
@@ -89,17 +119,18 @@ class TrackEditorMainWindow(MainWindow):
             del self.dialogs['callbacks']
         
         self.map.clear()
-        self.map.coords = arr
+        self.map.coords = self.coords
         self.map.plot()
         
         self.graph.clear(axis='on')
-        self.graph.coords = arr
+        self.graph.coords = self.coords
         self.graph.plot()
-        logging.debug('Mapping %s' % fn)
+        logging.debug('Mapping %s' % self.track_fn)
         
         self.callbacks['link_location'] = LinkLocationCallback(self)
+        self.callbacks['link_location'].connect()
         
-        self.setWindowTitle('%s : %s' % (program_name, fn))
+        self.setWindowTitle('%s : %s' % (program_name, self.track_fn))
    
     def slot_exit(self):
         self.close()
