@@ -127,8 +127,13 @@ class TrackEditorMainWindow(MainWindow):
         self.graph.plot()
         logging.debug('Mapping %s' % self.track_fn)
         
-        self.callbacks['link_location'] = LinkLocationCallback(self)
-        self.callbacks['link_location'].connect()
+        callbacks = [('link_location', LinkLocationCallback, [self], True),
+                     ('link_axes_limits', ChangeLimitsCallback, [self], True)]
+        for label, cls, args, connect in callbacks:
+            callback = cls(*args)
+            if connect:
+                callback.connect()
+            self.callbacks[label] = callback
         
         self.setWindowTitle('%s : %s' % (program_name, self.track_fn))
    
@@ -154,20 +159,32 @@ class CallbacksDialog(QtGui.QDialog):
         
     def init_ui(self):
         main_layout = QtGui.QVBoxLayout(self)
-        
         for callback in self.parent.callbacks.values():
             cb = QtGui.QCheckBox(callback.name, self)
+            cb.setTristate(False)
             main_layout.addWidget(cb)
             cb.stateChanged.connect(callback.slot_state_changed)
-        
+            if callback.connected:
+                cb.setChecked(True)
+            else:
+                cb.setChecked(False)
         self.setLayout(main_layout)
-        self.setWindowTitle('Enable graph features')
+        self.setWindowTitle('Enable/disable graph features')
         
+        
+        
+class CallbackHandler(object):
+    def slot_state_changed(self, state):
+        if state == Qt.Checked:
+            self.connect()
+        elif state == Qt.Unchecked:
+            self.disconnect()
 
     
-class LinkLocationCallback(object):
+class LinkLocationCallback(CallbackHandler):
     def __init__(self, parent):
         self.parent = parent
+        self.connected = False
         self.cid_map = None
         self.cid_graph = None
         self.name = 'Link mouse between map and graph'
@@ -177,16 +194,12 @@ class LinkLocationCallback(object):
     def connect(self):
         self.cid_map = self.parent.map.canvas.mpl_connect('motion_notify_event', self.on_map_motion)
         self.cid_graph = self.parent.graph.canvas.mpl_connect('motion_notify_event', self.on_graph_motion)
+        self.connected = True
         
     def disconnect(self):
         self.parent.map.canvas.mpl_disconnect(self.cid_map)
         self.parent.graph.canvas.mpl_disconnect(self.cid_graph)
-        
-    def slot_state_changed(self, state):
-        if state == Qt.Checked:
-            self.connect()
-        elif state == Qt.Unchecked:
-            self.disconnect()
+        self.connected = False
             
     def remove_location_markers(self):
         for obj in (self.parent.map, self.parent.graph):
@@ -229,6 +242,88 @@ class LinkLocationCallback(object):
         graph.draw()
         map.draw()
         
+        
+
+class AxesLimitsChangedHandler(object): 
+    '''http://matplotlib.1069221.n5.nabble.com/Callback-after-axis-limits-changed-and-redraw-td16443.html'''
+    def __init__(self, func): 
+        self.func = func 
+        self.reset() 
+        self.mouse_up = False 
+
+    def reset(self): 
+        self.limits_changed = 0 
+        self.got_draw = False 
+
+    def axis_limit_changed(self, ax): 
+        self.limits_changed += 1 
+        self.check_status() 
+
+    def draw_event(self, event): 
+        self.got_draw = True 
+        self.check_status() 
+
+    def mouse_up_event(self, event): 
+        self.mouse_up = True 
+        self.check_status() 
+
+    def mouse_down_event(self, event): 
+        self.mouse_up = False 
+
+    def both_limits_changed(self): 
+        return (self.limits_changed >= 2) & self.mouse_up 
+
+    def interaction_complete(self): 
+        return (self.limits_changed > 0) & self.got_draw & self.mouse_up 
+ 
+    def check_status(self): 
+        if self.both_limits_changed() | self.interaction_complete(): 
+            self.func() 
+            self.reset() 
+
+    
+    
+class ChangeLimitsCallback(CallbackHandler):
+    def __init__(self, parent):
+        self.parent = parent
+        self.connected = False
+        self.name = 'Auto-adjust map and graph after zooming or panning'
+        self.status = True
+        logging.debug('__init__ ChangeLimitsCallback')
+        
+    def connect(self):
+        self.map_disconnect_functions = self.connect_handler(
+                self.parent.map, AxesLimitsChangedHandler(self.map_limits_changed))
+        self.graph_disconnect_functions = self.connect_handler(
+                self.parent.graph, AxesLimitsChangedHandler(self.graph_limits_changed))
+        self.connected = True
+        
+    def connect_handler(self, widget, handler):
+        '''Returns a list of functions that should be called to disconnect
+        the callbacks.'''
+        disconnect_from_canvas = lambda id: lambda: widget.canvas.mpl_disconnect(id)
+        disconnect_from_axes = lambda id: lambda: widget.ax.callbacks.disconnect(id)
+        dfc = disconnect_from_canvas
+        dfa = disconnect_from_axes
+        return (dfc(widget.canvas.mpl_connect('draw_event', handler.draw_event)),
+                dfc(widget.canvas.mpl_connect('button_release_event', handler.mouse_up_event)),
+                dfc(widget.canvas.mpl_connect('button_press_event', handler.mouse_down_event)),
+                dfa(widget.ax.callbacks.connect('xlim_changed', handler.axis_limit_changed)),
+                dfa(widget.ax.callbacks.connect('ylim_changed', handler.axis_limit_changed)))
+        
+    def disconnect(self):
+        for func in self.map_disconnect_functions:
+            func()
+        for func in self.graph_disconnect_functions:
+            func()
+        self.connected = False
+        
+    def map_limits_changed(self):
+        logging.debug('map axes limits changed.')
+        
+    def graph_limits_changed(self):
+        logging.debug('graph axes limits changed.')
+    
     
     
 class TrackMap(QtGui.QWidget):
