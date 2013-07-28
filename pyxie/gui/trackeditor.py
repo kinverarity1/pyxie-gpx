@@ -7,6 +7,7 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.lines import Line2D
 from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 import numpy as np
+from pytz import timezone
 
 from pyxie import io
 from pyxie import core
@@ -23,16 +24,21 @@ class TrackEditorMainWindow(MainWindow):
     def __init__(self, *args, **kwargs):
         logging.debug('args=%s kwargs=%s' % (args, kwargs))
         MainWindow.__init__(self, *args, **kwargs)
+        self.dialogs = {}
+        self.callbacks = {}
         self.init_ui()
         
     def init_ui(self):
-        open_track = self.create_action(text='Open track', shortcut='Ctrl+O', slot=self.slot_open_track)
+        open_track = self.create_action(text='Open track...', shortcut='Ctrl+O', slot=self.slot_open_track)
+        show_callbacks_dialog = self.create_action(text='Enable/disable graph features...', slot=self.slot_show_callbacks_dialog)
         exit = self.create_action(text='E&xit', shortcut='Alt+F4', slot=self.slot_exit)
-        about = self.create_action(text='&About', shortcut='F1', slot=self.slot_about)
+        about = self.create_action(text='&About...', shortcut='F1', slot=self.slot_about)
         menubar = self.menuBar()
         file_menu = menubar.addMenu('&File')
+        view_menu = menubar.addMenu('&View')
         help_menu = menubar.addMenu('&Help')
         self.add_actions(file_menu, [open_track, exit])
+        self.add_actions(view_menu, [show_callbacks_dialog])
         self.add_actions(help_menu, [about])
         
         main_widget = QtGui.QWidget(self)
@@ -48,7 +54,7 @@ class TrackEditorMainWindow(MainWindow):
         main_layout.addWidget(splitter)
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
-        
+                
         self.map.clear()
         self.graph.clear(axis='off')
         
@@ -56,6 +62,12 @@ class TrackEditorMainWindow(MainWindow):
         # self.showMaximized()
         self.setWindowTitle(program_name)
         self.show()
+        
+    def slot_show_callbacks_dialog(self):
+        if not 'callbacks' in self.dialogs:
+            self.dialogs['callbacks'] = CallbacksDialog(self)
+        self.dialogs['callbacks'].show()
+        self.dialogs['callbacks'].activateWindow()
    
     def slot_open_track(self):
         dialog = QtGui.QFileDialog()
@@ -64,8 +76,17 @@ class TrackEditorMainWindow(MainWindow):
                 'Import track file', os.getcwd(),
                 'GPS Exchange Format (*.gpx)'
                 )
+        if not os.path.isfile(fn):
+            return
         arr = io.read_gpx(fn)
         logging.info('Read %d points from %s' % (arr.shape[0], fn))
+        
+        for callback in self.callbacks.values():
+            callback.disconnect()
+        self.callbacks.clear()
+        if 'callbacks' in self.dialogs:
+            self.dialogs['callbacks'].close()
+            del self.dialogs['callbacks']
         
         self.map.clear()
         self.map.coords = arr
@@ -75,6 +96,10 @@ class TrackEditorMainWindow(MainWindow):
         self.graph.coords = arr
         self.graph.plot()
         logging.debug('Mapping %s' % fn)
+        
+        self.callbacks['link_location'] = LinkLocationCallback(self)
+        
+        self.setWindowTitle('%s : %s' % (program_name, fn))
    
     def slot_exit(self):
         self.close()
@@ -88,6 +113,91 @@ class TrackEditorMainWindow(MainWindow):
                         'version': program_version,
                         })
     
+    
+    
+class CallbacksDialog(QtGui.QDialog):
+    def __init__(self, parent, *args, **kwargs):
+        QtGui.QDialog.__init__(self, *args, **kwargs)
+        self.parent = parent
+        self.init_ui()
+        
+    def init_ui(self):
+        main_layout = QtGui.QVBoxLayout(self)
+        
+        for callback in self.parent.callbacks.values():
+            cb = QtGui.QCheckBox(callback.name, self)
+            main_layout.addWidget(cb)
+            cb.stateChanged.connect(callback.slot_state_changed)
+        
+        self.setLayout(main_layout)
+        self.setWindowTitle('Enable graph features')
+        
+
+    
+class LinkLocationCallback(object):
+    def __init__(self, parent):
+        self.parent = parent
+        self.cid_map = None
+        self.cid_graph = None
+        self.name = 'Link mouse between map and graph'
+        self.status = True
+        logging.debug('__init__ LinkLocationCallback')
+        
+    def connect(self):
+        self.cid_map = self.parent.map.canvas.mpl_connect('motion_notify_event', self.on_map_motion)
+        self.cid_graph = self.parent.graph.canvas.mpl_connect('motion_notify_event', self.on_graph_motion)
+        
+    def disconnect(self):
+        self.parent.map.canvas.mpl_disconnect(self.cid_map)
+        self.parent.graph.canvas.mpl_disconnect(self.cid_graph)
+        
+    def slot_state_changed(self, state):
+        if state == Qt.Checked:
+            self.connect()
+        elif state == Qt.Unchecked:
+            self.disconnect()
+            
+    def remove_location_markers(self):
+        for obj in (self.parent.map, self.parent.graph):
+            if 'link_location_marker' in obj.artists:
+                obj.artists['link_location_marker'].remove()
+                del obj.artists['link_location_marker']
+            
+    def on_map_motion(self, event):
+        map = self.parent.map
+        if event.inaxes is self.parent.map.ax:
+            index = ((map.xs - event.xdata) ** 2 + (map.ys - event.ydata) ** 2).argmin()
+            self.update_markers(index)
+            # logging.debug('map motion at %s %s!' % (event.xdata, event.ydata))
+    
+    def on_graph_motion(self, event):
+        graph = self.parent.graph
+        if event.inaxes is graph.ax:
+            index = (np.abs(np.array(graph.mpl_dts) - event.xdata)).argmin()
+            self.update_markers(index)
+            # logging.debug('graph motion i=%s at time %s' % (index, num2date(event.xdata)))
+            
+    def update_markers(self, i):
+        map = self.parent.map
+        graph = self.parent.graph
+        
+        if not 'link_location_marker' in graph.artists:
+            graph.artists['link_location_marker'] = graph.ax.plot(
+                    [graph.mpl_dts[i]], [graph.speed[i]], marker='o', mfc='k', mec='k')[0]
+        else:
+            graph.artists['link_location_marker'].set_xdata([graph.mpl_dts[i]])
+            graph.artists['link_location_marker'].set_ydata([graph.speed[i]])
+        
+        if not 'link_location_marker' in map.artists:
+            map.artists['link_location_marker'] = map.ax.plot(
+                    [map.xs[i]], [map.ys[i]], marker='o', mfc='k', mec='k')[0]
+        else:
+            map.artists['link_location_marker'].set_xdata([map.xs[i]])
+            map.artists['link_location_marker'].set_ydata([map.ys[i]])
+            
+        graph.draw()
+        map.draw()
+        
     
     
 class TrackMap(QtGui.QWidget):
@@ -110,6 +220,8 @@ class TrackMap(QtGui.QWidget):
         xs, ys = core.convert_coordinate_system(
                 self.coords[:, 1], self.coords[:, 2], epsg2='28353')
         self.artists['track'] = self.ax.plot(xs, ys)[0]
+        self.xs = xs
+        self.ys = ys
         self.draw()
     
     def clear(self):
@@ -123,7 +235,7 @@ class TrackMap(QtGui.QWidget):
         self.ax.set_aspect(aspect='equal', adjustable='datalim')
         
     def draw(self):
-        self.canvas.draw()
+        self.canvas.draw_idle()
     
         
         
@@ -148,7 +260,12 @@ class TrackGraph(QtGui.QWidget):
                 self.coords[:, 1], self.coords[:, 2], epsg2='28353')
         speed = core.speed(self.coords[:, 0], xs, ys)
         epoch_times = self.coords[:, 0]
-        mpl_dts = epoch2num(epoch_times)
+        tz = timezone('Australia/Adelaide')
+        utc = timezone('UTC')
+        dts = [datetime.datetime.fromtimestamp(et) for et in epoch_times]
+        utc_dts = [utc.localize(dt) for dt in dts]
+        dts_localised = [dt.astimezone(tz) for dt in utc_dts]
+        mpl_dts = date2num(dts_localised)
         self.artists['line'] = self.ax.plot_date(
                 mpl_dts, speed, ls='-', marker='None')[0]
         min_mpl_dts = min(mpl_dts)
@@ -157,7 +274,10 @@ class TrackGraph(QtGui.QWidget):
         self.ax.set_xlim(min_mpl_dts - range_mpl_dts * 0.05, 
                          max_mpl_dts + range_mpl_dts * 0.05)
         self.ax.set_ylim(-1, max(speed) + max(speed) * 0.05)
+        self.mpl_dts = mpl_dts
+        self.speed = speed
         self.draw()
+        
     
     def clear(self, axis='off'):
         for artist in self.artists.values():
@@ -170,6 +290,5 @@ class TrackGraph(QtGui.QWidget):
         self.ax.set_aspect(aspect='auto', adjustable='datalim')
         
     def draw(self):
-        self.canvas.draw()
+        self.canvas.draw_idle()
     
-        
