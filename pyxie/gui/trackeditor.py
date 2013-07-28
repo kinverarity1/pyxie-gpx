@@ -287,41 +287,34 @@ class ChangeLimitsCallback(CallbackHandler):
     def __init__(self, parent):
         self.parent = parent
         self.connected = False
+        self.map_cids = []
+        self.graph_cids = []
         self.name = 'Auto-adjust map and graph after zooming or panning'
         self.status = True
         logging.debug('__init__ ChangeLimitsCallback')
         
     def connect(self):
-        self.map_disconnect_functions = self.connect_handler(
-                self.parent.map, AxesLimitsChangedHandler(self.map_limits_changed))
-        self.graph_disconnect_functions = self.connect_handler(
-                self.parent.graph, AxesLimitsChangedHandler(self.graph_limits_changed))
+        self.map_cids = [
+            self.parent.map.ax.callbacks.connect('xlim_changed', self.map_limits_changed),
+            self.parent.map.ax.callbacks.connect('ylim_changed', self.map_limits_changed)]
+        self.graph_cids = [
+            self.parent.graph.ax.callbacks.connect('xlim_changed', self.graph_limits_changed),
+            self.parent.graph.ax.callbacks.connect('ylim_changed', self.graph_limits_changed)]
         self.connected = True
         
-    def connect_handler(self, widget, handler):
-        '''Returns a list of functions that should be called to disconnect
-        the callbacks.'''
-        disconnect_from_canvas = lambda id: lambda: widget.canvas.mpl_disconnect(id)
-        disconnect_from_axes = lambda id: lambda: widget.ax.callbacks.disconnect(id)
-        dfc = disconnect_from_canvas
-        dfa = disconnect_from_axes
-        return (dfc(widget.canvas.mpl_connect('draw_event', handler.draw_event)),
-                dfc(widget.canvas.mpl_connect('button_release_event', handler.mouse_up_event)),
-                dfc(widget.canvas.mpl_connect('button_press_event', handler.mouse_down_event)),
-                dfa(widget.ax.callbacks.connect('xlim_changed', handler.axis_limit_changed)),
-                dfa(widget.ax.callbacks.connect('ylim_changed', handler.axis_limit_changed)))
-        
     def disconnect(self):
-        for func in self.map_disconnect_functions:
-            func()
-        for func in self.graph_disconnect_functions:
-            func()
+        for cid in self.map_cids:
+            self.parent.map.ax.callbacks.disconnect(cid)
+        for cid in self.graph_cids:
+            self.parent.graph.ax.callbacks.disconnect(cid)
         self.connected = False
         
-    def map_limits_changed(self):
-        logging.debug('map axes limits changed.')
+    def map_limits_changed(self, ax):
+        map = self.parent.map
+        # TODO: iterate over xs and flag the ones which are within the limits,
+        # repeat for y, find the good indices, pass it to a restrict_other_map function.
         
-    def graph_limits_changed(self):
+    def graph_limits_changed(self, ax):
         logging.debug('graph axes limits changed.')
     
     
