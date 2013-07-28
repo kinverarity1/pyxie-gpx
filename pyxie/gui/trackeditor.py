@@ -2,11 +2,14 @@ import datetime
 import logging
 import os
 
+from matplotlib.dates import date2num, num2date, epoch2num, num2epoch
+from matplotlib.gridspec import GridSpec
 from matplotlib.lines import Line2D
 from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 import numpy as np
 
 from pyxie import io
+from pyxie import core
 from pyxie.gui.qt import QtGui, QtCore, Qt, MainWindow, MplCanvas
 
 
@@ -33,21 +36,21 @@ class TrackEditorMainWindow(MainWindow):
         self.add_actions(help_menu, [about])
         
         main_widget = QtGui.QWidget(self)
-        main_layout = QtGui.QHBoxLayout(main_widget)
+        main_layout = QtGui.QVBoxLayout(main_widget)
         
+        self.map = TrackMap(5, 5)
         self.graph = TrackGraph(5, 5)
-        # self.table = CoordsTable(headers=['Time', 'X', 'Y', 'Z'])
         splitter = QtGui.QSplitter(main_widget)
+        splitter.setOrientation(Qt.Vertical)
+        splitter.addWidget(self.map)
         splitter.addWidget(self.graph)
-        # splitter.addWidget(self.table)
         
         main_layout.addWidget(splitter)
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
         
-        self.graph.clear()
-        # self.graph.link_to_coordstable(self.table)
-        # self.table.link_to_trackgraph(self.graph)
+        self.map.clear()
+        self.graph.clear(axis='off')
         
         self.setGeometry(400, 50, 900, 650) # debug
         # self.showMaximized()
@@ -61,13 +64,17 @@ class TrackEditorMainWindow(MainWindow):
                 'Import track file', os.getcwd(),
                 'GPS Exchange Format (*.gpx)'
                 )
-        self.graph.clear()
         arr = io.read_gpx(fn)
         logging.info('Read %d points from %s' % (arr.shape[0], fn))
+        
+        self.map.clear()
+        self.map.coords = arr
+        self.map.plot()
+        
+        self.graph.clear(axis='on')
         self.graph.coords = arr
         self.graph.plot()
-        logging.debug('Graphing %s' % fn)
-        # self.table.refresh_from_linked_trackgraph()
+        logging.debug('Mapping %s' % fn)
    
     def slot_exit(self):
         self.close()
@@ -83,10 +90,9 @@ class TrackEditorMainWindow(MainWindow):
     
     
     
-class TrackGraph(QtGui.QWidget):
+class TrackMap(QtGui.QWidget):
     def __init__(self, width, height, dpi=72):
         QtGui.QWidget.__init__(self)
-        self.table = None
         self.coords = np.empty(shape=(0, 2))
         self.artists = {}
         self.canvas = MplCanvas(self, width=width / float(dpi),
@@ -97,118 +103,73 @@ class TrackGraph(QtGui.QWidget):
         box.addWidget(self.canvas)
         self.setLayout(box)
         
-    def link_to_coordstable(self, table):
-        self.table = table
-        
-    def get_track(self):
-        if 'track' in self.artists:
-            return self.artists['track']
-        else:
-            return None
-    
-    def set_track(self, obj):
-        self.artists['track'] = obj
-    
-    track = property(get_track, set_track)
-        
     def plot(self):
-        if self.track:
-            self.track.remove()
-            del self.track
-        self.track = self.ax.plot(self.coords[:, 1], self.coords[:, 2])[0]
+        if 'track' in self.artists:
+            self.artists['track'].remove()
+            del self.artists['track']
+        xs, ys = core.convert_coordinate_system(
+                self.coords[:, 1], self.coords[:, 2], epsg2='28353')
+        self.artists['track'] = self.ax.plot(xs, ys)[0]
         self.draw()
-        
-    def point_selection_updated(self):
-        if not self.table:
-            return
-        else:
-            items = self.table.table_widget.selectedItems()
-            if 'table_selection' in self.artists:
-                logging.debug('%s' % self.artists['table_selection'])
-                while len(self.artists['table_selection']) > 0:
-                    self.artists['table_selection'].pop(0).remove()
-            self.artists['table_selection'] = []
-            rows_plotted = set()
-            for item in items:
-                drawn = self.ax.plot([self.coords[item.row(), 1]],
-                                     [self.coords[item.row(), 2]],
-                                     marker='o', mfc='k', mec='k', ms=10)
-                self.artists['table_selection'] += drawn
-            self.draw()
     
     def clear(self):
-        if 'table_selection' in self.artists:
-            while len(self.artists['table_selection']) > 0:
-                self.artists['table_selection'].pop(0).remove()
-        if self.track:
-            self.track.remove()
+        for artist in self.artists.values():
+            artist.remove()
         self.artists.clear()
         if 'ax' in self.__dict__:
             self.canvas.fig.delaxes(self.ax)
         self.ax = self.canvas.fig.add_axes([0, 0, 1, 1], aspect=True)
         self.ax.axis('off')
         self.ax.set_aspect(aspect='equal', adjustable='datalim')
-        #self.ax.set_autoscale_on(False)
         
     def draw(self):
         self.canvas.draw()
     
         
-class CoordsTable(QtGui.QWidget):
-    '''QWidget showing a table. Not editable.
-    
-    Args:
-        - *coords*: n x 2 array
-        - *headers*: n x list of strings
         
-    '''
-    def __init__(self, coords=None, headers=None):
+class TrackGraph(QtGui.QWidget):
+    def __init__(self, width, height, dpi=72):
         QtGui.QWidget.__init__(self)
-        self.graph = None
-        if coords is None:
-            coords = np.empty(shape=(0, 2))
-        self.coords = coords
-        if headers is None:
-            headers = ['Col%d' % i for i in range(self.coords.shape[0])]
-        self.headers = headers
-        self.init_ui()
-        self.refresh(self.coords)
-        
-    def link_to_trackgraph(self, graph):
-        self.graph = graph
-        self.table_widget.itemSelectionChanged.connect(
-                                            self.graph.point_selection_updated)
-        
-    def refresh_from_linked_trackgraph(self):
-        if self.graph:
-            self.coords = self.graph.coords
-            self.refresh()
-        
-    @property
-    def table(self):
-        table = []
-        for i in range(self.coords.shape[0]):
-            table.append([str(datetime.datetime.fromtimestamp(self.coords[i, 0])),
-                          str(self.coords[i, 1]),
-                          str(self.coords[i, 2]),
-                          str(self.coords[i, 3])])
-        return table
-        
-    def init_ui(self):
-        self.table_widget = QtGui.QTableWidget()
-        self.table_widget.setShowGrid(True)
+        self.coords = np.empty(shape=(0, 2))
+        self.artists = {}
+        self.canvas = MplCanvas(self, width=width / float(dpi),
+                                height=height / float(dpi), dpi=dpi)
+        self.mpl_toolbar = NavigationToolbar(self.canvas, self)
         box = QtGui.QVBoxLayout()
-        box.addWidget(self.table_widget)
+        box.addWidget(self.mpl_toolbar)
+        box.addWidget(self.canvas)
         self.setLayout(box)
-
-    def refresh(self, table=None):
-        if table is None:
-            table = self.table
-        self.table_widget.setRowCount(len(self.table))
-        self.table_widget.setColumnCount(len(self.headers))
-        self.table_widget.setHorizontalHeaderLabels(self.headers)
-        for i in range(len(self.table)):
-            for j in range(len(self.headers)):
-                self.table_widget.setItem(i, j, QtGui.QTableWidgetItem(self.table[i][j]))
-                
-                
+        
+    def plot(self):
+        if 'line' in self.artists:
+            self.artists['line'].remove()
+            del self.artists['line']
+        xs, ys = core.convert_coordinate_system(
+                self.coords[:, 1], self.coords[:, 2], epsg2='28353')
+        speed = core.speed(self.coords[:, 0], xs, ys)
+        epoch_times = self.coords[:, 0]
+        mpl_dts = epoch2num(epoch_times)
+        self.artists['line'] = self.ax.plot_date(
+                mpl_dts, speed, ls='-', marker='None')[0]
+        min_mpl_dts = min(mpl_dts)
+        max_mpl_dts = max(mpl_dts)
+        range_mpl_dts = max_mpl_dts - min_mpl_dts
+        self.ax.set_xlim(min_mpl_dts - range_mpl_dts * 0.05, 
+                         max_mpl_dts + range_mpl_dts * 0.05)
+        self.ax.set_ylim(-1, max(speed) + max(speed) * 0.05)
+        self.draw()
+    
+    def clear(self, axis='off'):
+        for artist in self.artists.values():
+            artist.remove()
+        self.artists.clear()
+        if 'ax' in self.__dict__:
+            self.canvas.fig.delaxes(self.ax)
+        self.ax = self.canvas.fig.add_axes([0.05, 0.1, 0.85, 0.94])
+        self.ax.axis(axis)
+        self.ax.set_aspect(aspect='auto', adjustable='datalim')
+        
+    def draw(self):
+        self.canvas.draw()
+    
+        
