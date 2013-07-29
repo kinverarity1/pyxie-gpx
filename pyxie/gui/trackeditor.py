@@ -7,17 +7,18 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.lines import Line2D
 from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 import numpy as np
-from pytz import timezone
+from pytz import timezone, all_timezones, common_timezones
 
 from pyxie import io
 from pyxie import core
-from pyxie.gui.qt import QtGui, QtCore, Qt, MainWindow, MplCanvas
+from pyxie.gui.qt import QtGui, QtCore, Qt, MainWindow, MplCanvas, ExtendedCombo
 
 
 
 program_name = 'Pyxie Track Editor'
 program_version = '0.1'
 callbacks = [('link_location', 'Link location on map and graph', True)]
+default_tz = 'Australia/Adelaide'
 
 logger = logging.getLogger(__name__)
 
@@ -453,6 +454,7 @@ class TrackGraph(QtGui.QWidget):
     def __init__(self, width, height, dpi=72):
         QtGui.QWidget.__init__(self)
         self.coords = np.empty(shape=(0, 2))
+        self.tz = timezone(default_tz)
         self.artists = {}
         self.canvas = MplCanvas(self, width=width / float(dpi),
                                 height=height / float(dpi), dpi=dpi)
@@ -462,6 +464,23 @@ class TrackGraph(QtGui.QWidget):
         box.addWidget(self.canvas)
         self.setLayout(box)
         
+        tz_combo = ExtendedCombo(self.canvas.toolbar)
+        tz_model = QtGui.QStandardItemModel()
+        for i, tz in enumerate(common_timezones):
+            item = QtGui.QStandardItem(tz)
+            tz_model.setItem(i, 0, item)
+        tz_combo.setModel(tz_model)
+        tz_combo.setModelColumn(0)
+        tz_combo.activated.connect(self.set_tz)
+        tz_combo.setCurrentIndex(common_timezones.index(default_tz))
+        self.canvas.toolbar.addWidget(tz_combo)
+        
+    def set_tz(self, index):
+        self.tz = timezone(common_timezones[index])
+        logger.debug('set_tz index=%d tz=%s' % (index, self.tz))
+        self.clear(axis='on')
+        self.plot()
+        
     def plot(self):
         if 'line' in self.artists:
             self.artists['line'].remove()
@@ -470,18 +489,17 @@ class TrackGraph(QtGui.QWidget):
                 self.coords[:, 1], self.coords[:, 2], epsg2='28353')
         speeds = core.speed(self.coords[:, 0], xs, ys)
         epoch_times = self.coords[:, 0]
-        tz = timezone('Australia/Adelaide')
         utc = timezone('UTC')
         dts = [datetime.datetime.fromtimestamp(et) for et in epoch_times]
-        logger.debug('dts=%s' % (', '.join([str(dt) for dt in dts])))
         utc_dts = [utc.localize(dt) for dt in dts]
-        logger.debug('utc_dts=%s' % (', '.join([str(dt) for dt in utc_dts])))
-        dts_localised = [dt.astimezone(tz) for dt in utc_dts]
+        dts_localised = [dt.astimezone(self.tz) for dt in utc_dts]
+        logger.debug('localised dt[0] = %s (self.tz=%s)' % (dts_localised[0], self.tz))
+        
         mpl_dts = np.array(dates.date2num(dts_localised))
         self.artists['line'] = self.ax.plot_date(
-                mpl_dts, speeds, ls='-', marker='None', tz=tz)[0]
+                mpl_dts, speeds, ls='-', marker='None', tz=self.tz)[0]
         dt_fmt = '%Y-%m-%d %H:%M:%S'
-        self.ax.fmt_xdata = dates.DateFormatter(dt_fmt, tz=tz)
+        self.ax.fmt_xdata = dates.DateFormatter(dt_fmt, tz=self.tz)
         
         min_mpl_dts = min(mpl_dts)
         max_mpl_dts = max(mpl_dts)
@@ -490,7 +508,6 @@ class TrackGraph(QtGui.QWidget):
                          max_mpl_dts + range_mpl_dts * 0.05)
         self.ax.set_ylim(-1, max(speeds) + max(speeds) * 0.05)
         
-        self.tz = tz
         self.mpl_dts = mpl_dts
         self.speeds = speeds
         
