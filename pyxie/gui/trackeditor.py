@@ -30,6 +30,8 @@ class TrackEditorMainWindow(MainWindow):
         logger.debug('__init__ split_direction=%s track_fn=%s' % (
                 split_direction, track_fn))
         self.track_fn = track_fn
+        self.map = None
+        self.graph = None
         self.dialogs = {}
         self.callbacks = {}
         self.split_direction = split_direction
@@ -120,6 +122,9 @@ class TrackEditorMainWindow(MainWindow):
             return
         self.track_fn = fn
         self.coords = io.read_gpx(fn)
+        if self.graph:
+            self.graph.xlim = (None, None)
+            self.graph.ylim = (None, None)
         logger.info('Read %d points from %s' % (self.coords.shape[0], fn))
         self.refresh()
         
@@ -484,7 +489,7 @@ class TrackGraph(QtGui.QWidget):
         tz_combo.setModelColumn(0)
         tz_combo.activated.connect(self.set_tz)
         tz_combo.setCurrentIndex(common_timezones.index(
-                config.get('datetime', default_timezone)))
+                config.get('datetime', 'default_timezone')))
         self.canvas.toolbar.addWidget(tz_combo)
         
     def set_tz(self, index):
