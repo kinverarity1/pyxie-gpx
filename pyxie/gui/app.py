@@ -6,14 +6,17 @@ import sys
 from PyQt4.QtGui import QApplication
 
 import pyxie
+from pyxie import config
 from pyxie.gui.trackeditor import TrackEditorMainWindow
-
 
 
 
 def main():
     app_name = 'trackeditor'
     args = get_parser().parse_args(sys.argv[1:])
+    if args.config_file:
+        print(config.USER_CFG)
+        sys.exit(0)
     return main_func(args, app_name=app_name)
     
     
@@ -23,6 +26,7 @@ def get_parser():
             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-a', '--app', default='trackeditor', help='Which app to launch')
     parser.add_argument('-v', '--verbose', default=50, help='1 to 50; lower is more detailed messages')
+    parser.add_argument('--config-file', action='store_true', help='Show the location of your configuration file')
     return parser
     
 

@@ -53,10 +53,17 @@ from appdirs import user_data_dir
 CFG_FN = 'pyxie.cfg'
 
 # Possible locations for CFG files
-
+data_dir = user_data_dir('Pyxie', 'Pyxie')
+if not os.path.isdir(data_dir):
+    os.makedirs(data_dir)
+    
 SYSTEM_CFG = os.path.join(os.path.dirname(__file__), CFG_FN)
-USER_CFG = os.path.join(os.path.expanduser('~'), CFG_FN)
+USER_CFG = os.path.join(data_dir, CFG_FN)
 WORKINGDIR_CFG = os.path.join(os.getcwd(), CFG_FN)
+    
+if not os.path.isfile(USER_CFG):
+    if os.path.isfile(SYSTEM_CFG):
+        shutil.copy(SYSTEM_CFG, USER_CFG)
     
     
 def load():
@@ -103,6 +110,3 @@ def load():
     
 config = load()
 
-data_dir = user_data_dir('Pyxie', 'Pyxie')
-if not os.path.isdir(data_dir):
-    os.makedirs(data_dir)
