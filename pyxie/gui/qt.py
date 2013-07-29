@@ -87,46 +87,34 @@ class MplCanvas(FigureCanvas):
                 
 
 class ExtendedCombo(QtGui.QComboBox):
+    '''Taken from http://stackoverflow.com/a/4829759/596328'''
     def __init__(self, parent=None):
         super(ExtendedCombo, self).__init__(parent)
-
         self.setFocusPolicy(Qt.StrongFocus)
-        self.setEditable( True )
-
-        self.setEditable( True )
-        self.completer = QtGui.QCompleter( self )
-
-        # always show all completions
-        self.completer.setCompletionMode( QtGui.QCompleter.UnfilteredPopupCompletion )
-        self.pFilterModel = QtGui.QSortFilterProxyModel( self )
-        self.pFilterModel.setFilterCaseSensitivity( Qt.CaseInsensitive )
-
-
-
-        self.completer.setPopup( self.view() )
-
-
-        self.setCompleter( self.completer )
-
-
-        self.lineEdit().textEdited[unicode].connect( self.pFilterModel.setFilterFixedString )
+        self.setEditable(True)
+        self.completer = QtGui.QCompleter(self)
+        self.completer.setCompletionMode(QtGui.QCompleter.UnfilteredPopupCompletion)
+        self.pFilterModel = QtGui.QSortFilterProxyModel(self)
+        self.pFilterModel.setFilterCaseSensitivity(Qt.CaseInsensitive)
+        self.completer.setPopup(self.view())
+        self.setCompleter(self.completer)
+        self.lineEdit().textEdited[unicode].connect(self.pFilterModel.setFilterFixedString)
         self.completer.activated.connect(self.setTextIfCompleterIsClicked)
 
-    def setModel( self, model ):
-        super(ExtendedCombo, self).setModel( model )
-        self.pFilterModel.setSourceModel( model )
+    def setModel(self, model):
+        super(ExtendedCombo, self).setModel(model)
+        self.pFilterModel.setSourceModel(model)
         self.completer.setModel(self.pFilterModel)
 
-    def setModelColumn( self, column ):
-        self.completer.setCompletionColumn( column )
-        self.pFilterModel.setFilterKeyColumn( column )
-        super(ExtendedCombo, self).setModelColumn( column )
+    def setModelColumn(self, column):
+        self.completer.setCompletionColumn(column)
+        self.pFilterModel.setFilterKeyColumn(column)
+        super(ExtendedCombo, self).setModelColumn(column)
 
-
-    def view( self ):
+    def view(self):
         return self.completer.popup()
 
-    def index( self ):
+    def index(self):
         return self.currentIndex()
 
     def setTextIfCompleterIsClicked(self, text):
