@@ -244,79 +244,137 @@ class LinkLocationCallback(CallbackHandler):
         
         
 
-class AxesLimitsChangedHandler(object): 
-    '''http://matplotlib.1069221.n5.nabble.com/Callback-after-axis-limits-changed-and-redraw-td16443.html'''
-    def __init__(self, func): 
-        self.func = func 
-        self.reset() 
-        self.mouse_up = False 
-
-    def reset(self): 
-        self.limits_changed = 0 
-        self.got_draw = False 
-
-    def axis_limit_changed(self, ax): 
-        self.limits_changed += 1 
-        self.check_status() 
-
-    def draw_event(self, event): 
-        self.got_draw = True 
-        self.check_status() 
-
-    def mouse_up_event(self, event): 
-        self.mouse_up = True 
-        self.check_status() 
-
-    def mouse_down_event(self, event): 
-        self.mouse_up = False 
-
-    def both_limits_changed(self): 
-        return (self.limits_changed >= 2) & self.mouse_up 
-
-    def interaction_complete(self): 
-        return (self.limits_changed > 0) & self.got_draw & self.mouse_up 
- 
-    def check_status(self): 
-        if self.both_limits_changed() | self.interaction_complete(): 
-            self.func() 
-            self.reset() 
-
-    
-    
 class ChangeLimitsCallback(CallbackHandler):
     def __init__(self, parent):
+        logger.debug('__init__ ChangeLimitsCallback')
         self.parent = parent
         self.connected = False
         self.map_cids = []
         self.graph_cids = []
         self.name = 'Auto-adjust map and graph after zooming or panning'
         self.status = True
-        logging.debug('__init__ ChangeLimitsCallback')
+        
+        self.refresh_status = 'inactive'
+        self.map_changed = False
+        self.map_clicked = False
+        self.graph_changed = False
+        self.graph_clicked = False
         
     def connect(self):
-        self.map_cids = [
+        self.map_canvas_cids = [
+            self.parent.map.canvas.mpl_connect('button_press_event', self.map_mouse_down),
+            self.parent.map.canvas.mpl_connect('button_release_event', self.map_mouse_up)]
+        self.graph_canvas_cids = [
+            self.parent.graph.canvas.mpl_connect('button_press_event', self.graph_mouse_down),
+            self.parent.graph.canvas.mpl_connect('button_release_event', self.graph_mouse_up)]
+        self.map_ax_cids = [
             self.parent.map.ax.callbacks.connect('xlim_changed', self.map_limits_changed),
             self.parent.map.ax.callbacks.connect('ylim_changed', self.map_limits_changed)]
-        self.graph_cids = [
+        self.graph_ax_cids = [
             self.parent.graph.ax.callbacks.connect('xlim_changed', self.graph_limits_changed),
             self.parent.graph.ax.callbacks.connect('ylim_changed', self.graph_limits_changed)]
         self.connected = True
         
     def disconnect(self):
-        for cid in self.map_cids:
+        for cid in self.map_canvas_cids:
+            self.parent.map.canvas.mpl_disconnect(cid)
+        for cid in self.graph_canvas_cids:
+            self.parent.graph.canvas.mpl_disconnect(cid)
+        for cid in self.map_ax_cids:
             self.parent.map.ax.callbacks.disconnect(cid)
-        for cid in self.graph_cids:
+        for cid in self.graph_ax_cids:
             self.parent.graph.ax.callbacks.disconnect(cid)
         self.connected = False
         
+    def map_mouse_down(self, event):
+        logger.debug('map_mouse_down')
+        if event.inaxes == self.parent.map.ax:
+            self.map_clicked = True
+        else:
+            self.map_clicked = False
+    
+    def map_mouse_up(self, event):
+        logger.debug('map_mouse_up')
+        self.map_clicked = False
+        if self.map_changed:
+            self.refresh_from_map(check=False)
+        
+    def graph_mouse_down(self, event):
+        logger.debug('graph_mouse_down')
+        if event.inaxes == self.parent.graph.ax:
+            self.graph_clicked = True
+        else:
+            self.graph_clicked = False
+                    
+    def graph_mouse_up(self, event):
+        logger.debug('graph_mouse_up')
+        self.graph_clicked = False
+        if self.graph_changed:
+            self.refresh_from_graph(check=False)
+        
     def map_limits_changed(self, ax):
-        map = self.parent.map
-        # TODO: iterate over xs and flag the ones which are within the limits,
-        # repeat for y, find the good indices, pass it to a restrict_other_map function.
+        logger.debug('map axes limits changed')
+        self.map_changed = True
+        
+        # The below causes some kind of weird recursive problem. The only need
+        # for me to track this is AFAICT with the NavigationToolbar prev/next view
+        # buttons.
+        
+        # self.refresh_from_map(check=True)
         
     def graph_limits_changed(self, ax):
-        logging.debug('graph axes limits changed.')
+        logger.debug('graph axes limits changed.')
+        self.graph_changed = True
+        # The below causes some kind of weird recursive problem. The only need
+        # for me to track this is AFAICT with the NavigationToolbar prev/next view
+        # buttons.
+        
+        # self.refresh_from_graph(check=True)
     
+    def refresh_from_map(self, check=True):
+        logger.debug('refresh from map')
+        map = self.parent.map
+        graph = self.parent.graph
+        if check and self.map_clicked:
+            return
+        if self.refresh_status == 'active':
+            return
+        self.refresh_status = 'active'
+        logger.debug('Using changed map lims to refresh graph...')
+        xlim = map.ax.get_xlim()
+        ylim = map.ax.get_ylim()
+        valid_points = (((map.xs >= xlim[0]) & (map.xs <= xlim[1]))
+                        & ((map.ys >= ylim[0]) & (map.ys <= ylim[1])))
+        mpl_dts = graph.mpl_dts[valid_points]
+        speed = graph.speed[valid_points]
+        if np.any(mpl_dts):
+            graph.ax.set_xlim(np.nanmin(mpl_dts), np.nanmax(mpl_dts))
+        if np.any(speed):
+            graph.ax.set_ylim(np.nanmin(speed), np.nanmax(speed))
+        graph.draw()
+        self.refresh_status = 'inactive'
+        
+    def refresh_from_graph(self, check=True):
+        logger.debug('refresh from graph')
+        map = self.parent.map
+        graph = self.parent.graph
+        if check and self.graph_clicked:
+            return
+        if self.refresh_status == 'active':
+            return
+        self.refresh_status = 'active'
+        logger.debug('Using changed graph lims to refresh map...')
+        dt_lim = graph.ax.get_xlim()
+        speed_lim = graph.ax.get_ylim()
+        valid_points = (((graph.mpl_dts >= dt_lim[0]) & (graph.mpl_dts <= dt_lim[1]))
+                        & ((graph.speed >= speed_lim[0]) & (graph.speed <= speed_lim[1])))
+        xs = map.xs[valid_points]
+        ys = map.ys [valid_points]
+        if np.any(xs):
+            map.ax.set_xlim(np.nanmin(xs), np.nanmax(xs))
+            map.ax.set_ylim(np.nanmin(ys), np.nanmax(ys))
+        map.draw()
+        self.refresh_status = 'inactive'
     
     
 class TrackMap(QtGui.QWidget):
