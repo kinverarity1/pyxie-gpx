@@ -4,8 +4,6 @@ import numpy as np
 
 import pyproj
 
-# from pyxie._logging import get_logger
-
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,6 @@ import sys
 
 from PyQt4.QtGui import QApplication
 
-# from pyxie import _logging
 from pyxie.gui.trackeditor import TrackEditorMainWindow
 
 

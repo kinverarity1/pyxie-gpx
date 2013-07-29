@@ -12,7 +12,6 @@ from pytz import timezone
 from pyxie import io
 from pyxie import core
 from pyxie.gui.qt import QtGui, QtCore, Qt, MainWindow, MplCanvas
-# from pyxie._logging import get_logger
 
 
 
