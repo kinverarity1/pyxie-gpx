@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 
         
 class TrackEditorMainWindow(MainWindow):
-    def __init__(self, split_direction='horizontal', track_fn=None):
+    def __init__(self, split_direction='horizontal', track_fn=None, 
+                 graph_kws=None):
         MainWindow.__init__(self)
         logger.debug('__init__ split_direction=%s track_fn=%s' % (
                 split_direction, track_fn))
@@ -34,12 +35,15 @@ class TrackEditorMainWindow(MainWindow):
         self.dialogs = {}
         self.callbacks = {}
         self.split_direction = split_direction
-        self.init_ui(split_direction=split_direction)
+        self.init_ui(split_direction=split_direction,
+                     graph_kws=graph_kws)
         if track_fn:
             self.open_track(track_fn)
                 
         
-    def init_ui(self, split_direction='horizontal'):
+    def init_ui(self, split_direction='horizontal', graph_kws=None):
+        if graph_kws is None:
+            graph_kws = {}
         self.split_direction = split_direction
             
         open_track = self.create_action(text='Open track...', shortcut='Ctrl+O', slot=self.slot_open_track)
@@ -59,7 +63,7 @@ class TrackEditorMainWindow(MainWindow):
         main_layout = QtGui.QVBoxLayout(main_widget)
         
         self.map = TrackMap(5, 5)
-        self.graph = TrackGraph(5, 5)
+        self.graph = TrackGraph(5, 5, **graph_kws)
         splitter = QtGui.QSplitter(main_widget)
         if split_direction == 'horizontal':
             splitter.setOrientation(Qt.Vertical)
@@ -93,11 +97,14 @@ class TrackEditorMainWindow(MainWindow):
     def slot_flip_gui_direction(self):
         logger.debug('flipping gui direction')
         if self.split_direction == 'horizontal':
-            self.close()
-            self.__init__(split_direction='vertical', track_fn=self.track_fn)
+            new_split_dir = 'vertical'
         elif self.split_direction == 'vertical':
-            self.close()
-            self.__init__(split_direction='horizontal', track_fn=self.track_fn)
+            new_split_dir = 'horizontal'
+        self.close()
+        self.__init__(split_direction=new_split_dir, 
+                      track_fn=self.track_fn,
+                      graph_kws=dict(xlim=self.graph.xlim,
+                                     ylim=self.graph.ylim))
    
     def slot_open_track(self):
         logger.debug('Asking for track fn')
@@ -349,7 +356,8 @@ class ChangeLimitsCallback(CallbackHandler):
     def map_limits_changed(self, ax):
         # logger.debug('map axes limits changed')
         self.map_changed = True
-        
+        self.parent.map.xlim = self.parent.map.ax.get_xlim()
+        self.parent.map.ylim = self.parent.map.ax.get_ylim()        
         # The below causes some kind of weird recursive problem. The only need
         # for me to track this is AFAICT with the NavigationToolbar prev/next view
         # buttons.
@@ -359,6 +367,8 @@ class ChangeLimitsCallback(CallbackHandler):
     def graph_limits_changed(self, ax):
         # logger.debug('graph axes limits changed.')
         self.graph_changed = True
+        self.parent.graph.xlim = self.parent.graph.ax.get_xlim()
+        self.parent.graph.ylim = self.parent.graph.ax.get_ylim()
         # The below causes some kind of weird recursive problem. The only need
         # for me to track this is AFAICT with the NavigationToolbar prev/next view
         # buttons.
@@ -451,10 +461,13 @@ class TrackMap(QtGui.QWidget):
         
         
 class TrackGraph(QtGui.QWidget):
-    def __init__(self, width, height, dpi=72):
+    def __init__(self, width, height, dpi=72, xlim=(None, None), ylim=(None, None)):
+        logger.debug('TrackGraph __init__ xlim=%s ylim=%s' % (xlim, ylim))
         QtGui.QWidget.__init__(self)
         self.coords = np.empty(shape=(0, 2))
         self.tz = timezone(default_tz)
+        self.xlim = xlim
+        self.ylim = ylim
         self.artists = {}
         self.canvas = MplCanvas(self, width=width / float(dpi),
                                 height=height / float(dpi), dpi=dpi)
@@ -501,12 +514,30 @@ class TrackGraph(QtGui.QWidget):
         dt_fmt = '%Y-%m-%d %H:%M:%S'
         self.ax.fmt_xdata = dates.DateFormatter(dt_fmt, tz=self.tz)
         
-        min_mpl_dts = min(mpl_dts)
-        max_mpl_dts = max(mpl_dts)
+        min_mpl_dts = np.nanmin(mpl_dts)
+        max_mpl_dts = np.nanmax(mpl_dts)
         range_mpl_dts = max_mpl_dts - min_mpl_dts
-        self.ax.set_xlim(min_mpl_dts - range_mpl_dts * 0.05, 
-                         max_mpl_dts + range_mpl_dts * 0.05)
-        self.ax.set_ylim(-1, max(speeds) + max(speeds) * 0.05)
+        
+        min_speed = np.nanmin(speeds)
+        max_speed = np.nanmax(speeds)
+        range_speed = max_speed - min_speed
+        
+        x0, x1 = self.xlim
+        y0, y1 = self.ylim
+        if x0 is None:
+            x0 = min_mpl_dts - range_mpl_dts * 0.05
+        if x1 is None:
+            x1 = max_mpl_dts + range_mpl_dts * 0.05
+        if y0 is None:
+            y0 = min_speed - range_speed * 0.05
+        if y1 is None:
+            y1 = max_speed + range_speed * 0.05
+            
+        self.ax.set_xlim(x0, x1)
+        self.ax.set_ylim(y0, y1)
+        
+        self.xlim = (x0, x1)
+        self.ylim = (y0, y1)
         
         self.mpl_dts = mpl_dts
         self.speeds = speeds
