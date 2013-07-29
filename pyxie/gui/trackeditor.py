@@ -2,7 +2,7 @@ import datetime
 import logging
 import os
 
-from matplotlib.dates import date2num, num2date, epoch2num, num2epoch
+from matplotlib import dates
 from matplotlib.gridspec import GridSpec
 from matplotlib.lines import Line2D
 from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
@@ -77,6 +77,10 @@ class TrackEditorMainWindow(MainWindow):
         self.setGeometry(400, 50, 900, 650) # debug
         # self.showMaximized()
         self.setWindowTitle(program_name)
+        
+        self.statusbar = QtGui.QStatusBar(self)
+        self.setStatusBar(self.statusbar)
+        
         self.show()
         
     def slot_show_callbacks_dialog(self):
@@ -205,11 +209,13 @@ class LinkLocationCallback(CallbackHandler):
         self.cid_map = self.parent.map.canvas.mpl_connect('motion_notify_event', self.on_map_motion)
         self.cid_graph = self.parent.graph.canvas.mpl_connect('motion_notify_event', self.on_graph_motion)
         self.connected = True
+        logger.debug('(%s) connected (connected=%s)' % (self.name, self.connected))
         
     def disconnect(self):
         self.parent.map.canvas.mpl_disconnect(self.cid_map)
         self.parent.graph.canvas.mpl_disconnect(self.cid_graph)
         self.connected = False
+        logger.debug('(%s) disconnected (connected=%s)' % (self.name, self.connected))
             
     def remove_location_markers(self):
         for obj in (self.parent.map, self.parent.graph):
@@ -237,10 +243,10 @@ class LinkLocationCallback(CallbackHandler):
         
         if not 'link_location_marker' in graph.artists:
             graph.artists['link_location_marker'] = graph.ax.plot(
-                    [graph.mpl_dts[i]], [graph.speed[i]], marker='o', mfc='k', mec='k')[0]
+                    [graph.mpl_dts[i]], [graph.speeds[i]], marker='o', mfc='k', mec='k')[0]
         else:
             graph.artists['link_location_marker'].set_xdata([graph.mpl_dts[i]])
-            graph.artists['link_location_marker'].set_ydata([graph.speed[i]])
+            graph.artists['link_location_marker'].set_ydata([graph.speeds[i]])
         
         if not 'link_location_marker' in map.artists:
             map.artists['link_location_marker'] = map.ax.plot(
@@ -251,6 +257,17 @@ class LinkLocationCallback(CallbackHandler):
             
         graph.draw()
         map.draw()
+        
+        def formatter(index):
+            x = map.xs[index]
+            y = map.ys[index]
+            speed = graph.speeds[index]
+            dt = dates.num2date(graph.mpl_dts[index], tz=graph.tz)
+            dt_fmt = '%a %Y-%m-%d %H:%M:%S'
+            return 'Nearest point: time=%s x=%.2f y=%.2f speed=%.2f' % (
+                    dt.strftime(dt_fmt), x, y, speed)
+                    
+        self.parent.statusbar.showMessage(formatter(i))
         
         
 
@@ -284,6 +301,7 @@ class ChangeLimitsCallback(CallbackHandler):
             self.parent.graph.ax.callbacks.connect('xlim_changed', self.graph_limits_changed),
             self.parent.graph.ax.callbacks.connect('ylim_changed', self.graph_limits_changed)]
         self.connected = True
+        logger.debug('(%s) connected (connected=%s)' % (self.name, self.connected))
         
     def disconnect(self):
         for cid in self.map_canvas_cids:
@@ -295,6 +313,11 @@ class ChangeLimitsCallback(CallbackHandler):
         for cid in self.graph_ax_cids:
             self.parent.graph.ax.callbacks.disconnect(cid)
         self.connected = False
+        del self.map_canvas_cids[0:len(self.map_canvas_cids)]
+        del self.map_ax_cids[0:len(self.map_ax_cids)]
+        del self.graph_canvas_cids[0:len(self.graph_canvas_cids)]
+        del self.graph_ax_cids[0:len(self.graph_ax_cids)]
+        logger.debug('(%s) disconnected (connected=%s)' % (self.name, self.connected))
         
     def map_mouse_down(self, event):
         logger.debug('map_mouse_down')
@@ -356,11 +379,11 @@ class ChangeLimitsCallback(CallbackHandler):
         valid_points = (((map.xs >= xlim[0]) & (map.xs <= xlim[1]))
                         & ((map.ys >= ylim[0]) & (map.ys <= ylim[1])))
         mpl_dts = graph.mpl_dts[valid_points]
-        speed = graph.speed[valid_points]
+        speeds = graph.speeds[valid_points]
         if np.any(mpl_dts):
             graph.ax.set_xlim(np.nanmin(mpl_dts), np.nanmax(mpl_dts))
         if np.any(speed):
-            graph.ax.set_ylim(np.nanmin(speed), np.nanmax(speed))
+            graph.ax.set_ylim(np.nanmin(speeds), np.nanmax(speeds))
         graph.draw()
         self.refresh_status = 'inactive'
         
@@ -377,7 +400,7 @@ class ChangeLimitsCallback(CallbackHandler):
         dt_lim = graph.ax.get_xlim()
         speed_lim = graph.ax.get_ylim()
         valid_points = (((graph.mpl_dts >= dt_lim[0]) & (graph.mpl_dts <= dt_lim[1]))
-                        & ((graph.speed >= speed_lim[0]) & (graph.speed <= speed_lim[1])))
+                        & ((graph.speeds >= speed_lim[0]) & (graph.speeds <= speed_lim[1])))
         xs = map.xs[valid_points]
         ys = map.ys [valid_points]
         if np.any(xs):
@@ -445,24 +468,32 @@ class TrackGraph(QtGui.QWidget):
             del self.artists['line']
         xs, ys = core.convert_coordinate_system(
                 self.coords[:, 1], self.coords[:, 2], epsg2='28353')
-        speed = core.speed(self.coords[:, 0], xs, ys)
+        speeds = core.speed(self.coords[:, 0], xs, ys)
         epoch_times = self.coords[:, 0]
         tz = timezone('Australia/Adelaide')
         utc = timezone('UTC')
         dts = [datetime.datetime.fromtimestamp(et) for et in epoch_times]
+        logger.debug('dts=%s' % (', '.join([str(dt) for dt in dts])))
         utc_dts = [utc.localize(dt) for dt in dts]
+        logger.debug('utc_dts=%s' % (', '.join([str(dt) for dt in utc_dts])))
         dts_localised = [dt.astimezone(tz) for dt in utc_dts]
-        mpl_dts = np.array(date2num(dts_localised))
+        mpl_dts = np.array(dates.date2num(dts_localised))
         self.artists['line'] = self.ax.plot_date(
-                mpl_dts, speed, ls='-', marker='None')[0]
+                mpl_dts, speeds, ls='-', marker='None', tz=tz)[0]
+        dt_fmt = '%Y-%m-%d %H:%M:%S'
+        self.ax.fmt_xdata = dates.DateFormatter(dt_fmt, tz=tz)
+        
         min_mpl_dts = min(mpl_dts)
         max_mpl_dts = max(mpl_dts)
         range_mpl_dts = max_mpl_dts - min_mpl_dts
         self.ax.set_xlim(min_mpl_dts - range_mpl_dts * 0.05, 
                          max_mpl_dts + range_mpl_dts * 0.05)
-        self.ax.set_ylim(-1, max(speed) + max(speed) * 0.05)
+        self.ax.set_ylim(-1, max(speeds) + max(speeds) * 0.05)
+        
+        self.tz = tz
         self.mpl_dts = mpl_dts
-        self.speed = speed
+        self.speeds = speeds
+        
         self.draw()
     
     def clear(self, axis='off'):
