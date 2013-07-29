@@ -28,12 +28,5 @@ def speed(times, xs, ys,
     dtimes = np.gradient(times) * time_factor_into_hrs
     distances = np.sqrt(dxs ** 2 + dys**2) * distance_factor_into_km
     speeds = distances / dtimes
-    logger.debug('xs=%s' % xs)
-    logger.debug('ys=%s' % ys)
-    logger.debug('dxs=%s' % dxs)
-    logger.debug('dys=%s' % dys)
-    logger.debug('dtimes=%s' % dtimes)
-    logger.debug('distances=%s' % distances)
-    logger.debug('speeds=%s' % speeds)
     return speeds
     

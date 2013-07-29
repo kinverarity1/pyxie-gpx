@@ -42,7 +42,7 @@ class TrackEditorMainWindow(MainWindow):
         self.split_direction = split_direction
             
         open_track = self.create_action(text='Open track...', shortcut='Ctrl+O', slot=self.slot_open_track)
-        show_callbacks_dialog = self.create_action(text='Enable/disable graph features...', slot=self.slot_show_callbacks_dialog)
+        # show_callbacks_dialog = self.create_action(text='Enable/disable graph features...', slot=self.slot_show_callbacks_dialog)
         set_gui_style = self.create_action(text='Flip orientation', slot=self.slot_flip_gui_direction)
         exit = self.create_action(text='E&xit', shortcut='Alt+F4', slot=self.slot_exit)
         about = self.create_action(text='&About...', shortcut='F1', slot=self.slot_about)
@@ -51,7 +51,7 @@ class TrackEditorMainWindow(MainWindow):
         view_menu = menubar.addMenu('&View')
         help_menu = menubar.addMenu('&Help')
         self.add_actions(file_menu, [open_track, exit])
-        self.add_actions(view_menu, [show_callbacks_dialog, set_gui_style])
+        self.add_actions(view_menu, [set_gui_style])
         self.add_actions(help_menu, [about])
         
         main_widget = QtGui.QWidget(self)
@@ -320,33 +320,33 @@ class ChangeLimitsCallback(CallbackHandler):
         logger.debug('(%s) disconnected (connected=%s)' % (self.name, self.connected))
         
     def map_mouse_down(self, event):
-        logger.debug('map_mouse_down')
+        # logger.debug('map_mouse_down')
         if event.inaxes == self.parent.map.ax:
             self.map_clicked = True
         else:
             self.map_clicked = False
     
     def map_mouse_up(self, event):
-        logger.debug('map_mouse_up')
+        # logger.debug('map_mouse_up')
         self.map_clicked = False
         if self.map_changed:
             self.refresh_from_map(check=False)
         
     def graph_mouse_down(self, event):
-        logger.debug('graph_mouse_down')
+        # logger.debug('graph_mouse_down')
         if event.inaxes == self.parent.graph.ax:
             self.graph_clicked = True
         else:
             self.graph_clicked = False
                     
     def graph_mouse_up(self, event):
-        logger.debug('graph_mouse_up')
+        # logger.debug('graph_mouse_up')
         self.graph_clicked = False
         if self.graph_changed:
             self.refresh_from_graph(check=False)
         
     def map_limits_changed(self, ax):
-        logger.debug('map axes limits changed')
+        # logger.debug('map axes limits changed')
         self.map_changed = True
         
         # The below causes some kind of weird recursive problem. The only need
@@ -356,7 +356,7 @@ class ChangeLimitsCallback(CallbackHandler):
         # self.refresh_from_map(check=True)
         
     def graph_limits_changed(self, ax):
-        logger.debug('graph axes limits changed.')
+        # logger.debug('graph axes limits changed.')
         self.graph_changed = True
         # The below causes some kind of weird recursive problem. The only need
         # for me to track this is AFAICT with the NavigationToolbar prev/next view
@@ -382,7 +382,7 @@ class ChangeLimitsCallback(CallbackHandler):
         speeds = graph.speeds[valid_points]
         if np.any(mpl_dts):
             graph.ax.set_xlim(np.nanmin(mpl_dts), np.nanmax(mpl_dts))
-        if np.any(speed):
+        if np.any(speeds):
             graph.ax.set_ylim(np.nanmin(speeds), np.nanmax(speeds))
         graph.draw()
         self.refresh_status = 'inactive'

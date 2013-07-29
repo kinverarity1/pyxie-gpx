@@ -4,6 +4,8 @@ from PyQt4.QtCore import Qt
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+
+
 class ActionHandler(object):
     '''A base class for Qt widgets, to make it easy to handle adding actions.
 
@@ -37,7 +39,6 @@ class ActionHandler(object):
             getattr(action, signal).connect(slot)
         return action
     
-
     def add_actions(self, target, actions):
         '''Add actions to a target, like a ToolBar or Menu.
 
@@ -85,6 +86,3 @@ class MplCanvas(FigureCanvas):
                 
                 
 
-                
-def debug(item):
-    print item.column(), item.row(), item.text()
