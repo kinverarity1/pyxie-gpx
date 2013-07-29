@@ -107,6 +107,7 @@ class GPXWaypoint(Element):
                 return echild.text
                         
                         
+                        
 class KMLcoordinates(Element):
     '''Wrapper for KML coordinates elements.
     

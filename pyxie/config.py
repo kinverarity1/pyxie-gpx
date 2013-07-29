@@ -103,8 +103,6 @@ def load():
     
 config = load()
 
-data_dir = user_data_dir(config.get('program', 'name'), config.get('program', 'name'))
+data_dir = user_data_dir('Pyxie', 'Pyxie')
 if not os.path.isdir(data_dir):
     os.makedirs(data_dir)
-
-log = StringIO.StringIO()

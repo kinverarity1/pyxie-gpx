@@ -1,12 +1,11 @@
-'''Entry point for the GUI applications.
-
-'''
+'''Launch a Pyxie GUI app.'''
 import argparse
 import logging
 import sys
 
 from PyQt4.QtGui import QApplication
 
+import pyxie
 from pyxie.gui.trackeditor import TrackEditorMainWindow
 
 
@@ -19,7 +18,10 @@ def main():
     
     
 def get_parser():
-    parser = argparse.ArgumentParser()
+    fix = lambda d: d.replace('Pyxie', 'Pyxie v%s' % pyxie.__version__)
+    parser = argparse.ArgumentParser(description=fix(__doc__), 
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-a', '--app', default='trackeditor', help='Which app to launch')
     parser.add_argument('-v', '--verbose', default=50, help='1 to 50; lower is more detailed messages')
     return parser
     
@@ -42,7 +44,7 @@ def main_func(args, app_name='trackeditor'):
         main_window.show()
         sys.exit(app.exec_())
     else:
-        logger.error('AppName %s not known; try trackeditor' % app_name)
+        logger.error('--app=%s not known; try trackeditor' % app_name)
 
     
 if __name__ == '__main__':

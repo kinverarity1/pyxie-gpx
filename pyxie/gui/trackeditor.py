@@ -7,21 +7,19 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.lines import Line2D
 from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 import numpy as np
-from pytz import timezone, all_timezones, common_timezones
+from pytz import timezone, common_timezones
 
+import pyxie
 from pyxie import io
 from pyxie import core
+from pyxie.config import config
 from pyxie.gui.qt import QtGui, QtCore, Qt, MainWindow, MplCanvas, ExtendedCombo
 
 
 
 program_name = 'Pyxie Track Editor'
-program_version = '0.1'
-callbacks = [('link_location', 'Link location on map and graph', True)]
-default_tz = 'Australia/Adelaide'
 
 logger = logging.getLogger(__name__)
-
 
 
         
@@ -161,7 +159,7 @@ class TrackEditorMainWindow(MainWindow):
                 '%(prog)s version %(version)s\n\n'
                 '' % {
                         'prog': program_name,
-                        'version': program_version,
+                        'version': pyxie.__version__,
                         })
     
     
@@ -465,7 +463,7 @@ class TrackGraph(QtGui.QWidget):
         logger.debug('TrackGraph __init__ xlim=%s ylim=%s' % (xlim, ylim))
         QtGui.QWidget.__init__(self)
         self.coords = np.empty(shape=(0, 2))
-        self.tz = timezone(default_tz)
+        self.tz = timezone(config.get('datetime', 'default_timezone'))
         self.xlim = xlim
         self.ylim = ylim
         self.artists = {}
@@ -485,7 +483,8 @@ class TrackGraph(QtGui.QWidget):
         tz_combo.setModel(tz_model)
         tz_combo.setModelColumn(0)
         tz_combo.activated.connect(self.set_tz)
-        tz_combo.setCurrentIndex(common_timezones.index(default_tz))
+        tz_combo.setCurrentIndex(common_timezones.index(
+                config.get('datetime', default_timezone)))
         self.canvas.toolbar.addWidget(tz_combo)
         
     def set_tz(self, index):
