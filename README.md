@@ -2,7 +2,7 @@
 
 Python GUI tools for viewing (and editing in the future) GPX tracks.
 
-![screenshot](http://bitbucket.org/kent104/pyxie/raw/master/examples/screenshot_v0.2.png)
+![screenshot](https://raw.github.com/kinverarity1/pyxie-gpx/master/examples/screenshot_v0.2.png)
 
 ## Install
 
