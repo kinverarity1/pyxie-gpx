@@ -2,17 +2,9 @@
 
 Python GUI tools for viewing (and editing in the future) GPX tracks.
 
-There are already innumberable tools out there for looking at walk/cycle/drive data, but I found myself stuck when I don't have internet access and all I want to do is look at, perhaps edit, and see general information about a trip I've taken. Also just fun to play around with it and learn more about building software with a GUI.
+There are already innumerable tools out there for looking at walk/cycle/drive data, but I found myself stuck when I don't have internet access and all I want to do is look at, perhaps edit, and see general information about a trip I've taken. Also just fun to play around with it and learn more about building software with a GUI.
 
 Another thing is splitting and cleaning GPX tracks. I want to be able to do it visually but I always seem to end up manually editing the XML file (!)
-
-## Install
-
-    $ python setup.py install
-    
-## Usage
-
-    $ pyxie
 
 ![screenshot](https://raw.github.com/kinverarity1/pyxie-gpx/master/examples/screenshot_v0.2.png)
 
