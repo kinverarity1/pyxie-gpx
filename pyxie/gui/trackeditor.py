@@ -12,6 +12,7 @@ from pytz import timezone, common_timezones
 import pyxie
 from pyxie import io
 from pyxie import core
+from pyxie import stats
 from pyxie.config import config
 from pyxie.gui.qt import QtGui, QtCore, Qt, MainWindow, MplCanvas, ExtendedCombo
 
@@ -547,6 +548,8 @@ class TrackGraph(QtGui.QWidget):
         self.speeds = speeds
         
         self.draw()
+        
+        print stats.Path(xs, ys, times=mpl_dts)
     
     def clear(self, axis='off'):
         for artist in self.artists.values():
