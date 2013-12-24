@@ -389,6 +389,7 @@ class ChangeLimitsCallback(CallbackHandler):
     
     def refresh_from_map(self, check=True):
         logger.debug('refresh from map')
+        return # TEMPORARILY REMOVE BECAUSE THIS BEHAVIOUR SEEMS ANNOYING TO ME
         map = self.parent.map
         graph = self.parent.graph
         if check and self.map_clicked:
