@@ -26,13 +26,16 @@ logger = logging.getLogger(__name__)
         
 class TrackEditorMainWindow(MainWindow):
     def __init__(self, split_direction='horizontal', track_fn=None, 
-                 graph_kws=None):
+                 graph_kws=None, dirname=None):
         MainWindow.__init__(self)
         logger.debug('__init__ split_direction=%s track_fn=%s' % (
                 split_direction, track_fn))
         self.track_fn = track_fn
         self.map = None
         self.graph = None
+        if dirname is None:
+            dirname = os.getcwd()
+        self.dirnames = [dirname]
         self.dialogs = {}
         self.callbacks = {}
         self.split_direction = split_direction
@@ -103,6 +106,7 @@ class TrackEditorMainWindow(MainWindow):
             new_split_dir = 'horizontal'
         self.close()
         self.__init__(split_direction=new_split_dir, 
+                      dirname=self.dirnames[-1],
                       track_fn=self.track_fn,
                       graph_kws=dict(xlim=self.graph.xlim,
                                      ylim=self.graph.ylim))
@@ -112,15 +116,19 @@ class TrackEditorMainWindow(MainWindow):
         dialog = QtGui.QFileDialog()
         dialog.setFileMode(QtGui.QFileDialog.ExistingFile)
         fn = dialog.getOpenFileName(self,
-                'Import track file', os.getcwd(),
+                'Import track file', self.dirnames[-1],
                 'GPS Exchange Format (*.gpx)'
                 )
         return self.open_track(fn)
         
     def open_track(self, fn):
-        logger.debug('Opening track_fn' % fn)
+        fn = str(fn)
+        logger.debug('Opening track_fn %s' % fn)
         if not os.path.isfile(fn):
             return
+        dirname = os.path.split(fn)[0]
+        if os.path.isdir(dirname):
+            self.dirnames.append(dirname)
         self.track_fn = fn
         self.coords = io.read_gpx(fn)
         if self.graph:
