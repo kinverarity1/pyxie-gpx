@@ -24,8 +24,12 @@ class Path(object):
         self.ys = ys
         self.times = times
         
+    @property
+    def total_distance(self):
+        return total_distance(self.xs, self.ys)
+        
     def __str__(self):
         return '\n'.join([
                 'Path statistics:',
-                'Distance: %s' % total_distance(self.xs, self.ys)
+                'Distance: %s' % self.total_distance,
                 ])
