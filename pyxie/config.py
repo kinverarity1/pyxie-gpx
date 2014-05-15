@@ -48,7 +48,11 @@ import os
 import shutil
 import urllib2
 
-from appdirs import user_data_dir
+try:
+    from appdirs import user_data_dir
+except ImportError:
+    user_data_dir = lambda x, y: os.path.join(os.path.expanduser('~'), '.pyxie')
+
 
 CFG_FN = 'pyxie.cfg'
 

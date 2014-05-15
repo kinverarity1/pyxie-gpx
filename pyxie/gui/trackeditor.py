@@ -1,6 +1,8 @@
+import argparse
 import datetime
 import logging
 import os
+import sys
 
 from matplotlib import dates
 from matplotlib.gridspec import GridSpec
@@ -9,12 +11,11 @@ from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as Navigatio
 import numpy as np
 from pytz import timezone, common_timezones
 
-import pyxie
-from pyxie import io
-from pyxie import core
-from pyxie import stats
-from pyxie.config import config
-from pyxie.gui.qt import QtGui, QtCore, Qt, MainWindow, MplCanvas, ExtendedCombo
+from .. import io
+from .. import core
+from .. import stats
+from ..config import config
+from .qt import QtGui, QtCore, Qt, MainWindow, MplCanvas, ExtendedCombo
 
 
 
@@ -25,12 +26,12 @@ logger = logging.getLogger(__name__)
 
         
 class TrackEditorMainWindow(MainWindow):
-    def __init__(self, split_direction='horizontal', track_fn=None, 
+    def __init__(self, split_direction='horizontal', file=None, 
                  graph_kws=None, dirname=None):
         MainWindow.__init__(self)
-        logger.debug('__init__ split_direction=%s track_fn=%s' % (
-                split_direction, track_fn))
-        self.track_fn = track_fn
+        logger.debug('__init__ split_direction=%s file=%s' % (
+                split_direction, file))
+        self.track_fn = file
         self.map = None
         self.graph = None
         if dirname is None:
@@ -41,8 +42,8 @@ class TrackEditorMainWindow(MainWindow):
         self.split_direction = split_direction
         self.init_ui(split_direction=split_direction,
                      graph_kws=graph_kws)
-        if track_fn:
-            self.open_track(track_fn)
+        if self.track_fn:
+            self.open_track(self.track_fn)
                 
         
     def init_ui(self, split_direction='horizontal', graph_kws=None):
@@ -107,7 +108,7 @@ class TrackEditorMainWindow(MainWindow):
         self.close()
         self.__init__(split_direction=new_split_dir, 
                       dirname=self.dirnames[-1],
-                      track_fn=self.track_fn,
+                      file=self.track_fn,
                       graph_kws=dict(xlim=self.graph.xlim,
                                      ylim=self.graph.ylim))
    
@@ -572,4 +573,32 @@ class TrackGraph(QtGui.QWidget):
         
     def draw(self):
         self.canvas.draw_idle()
+       
+       
+       
+def get_parser():
+    parser = argparse.ArgumentParser(
+            description='Pyxie Track Editor',
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('file', nargs='?', default=None)
+    return parser
     
+    
+def main():
+    args = get_parser().parse_args(sys.argv[1:])
+    
+    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                        level=logging.DEBUG)
+    logger = logging.getLogger(__name__)
+    kwargs = {'file': args.file}
+    
+    app = QtGui.QApplication([])
+    app.setStyle(QtGui.QStyleFactory.create('GTK'))
+    app.setPalette(QtGui.QApplication.style().standardPalette())
+    window = TrackEditorMainWindow(**kwargs)
+    window.show()
+    sys.exit(app.exec_())
+
+    
+if __name__ == '__main__':
+    main()

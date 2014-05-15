@@ -8,7 +8,7 @@ except ImportError:
     
 setup(name='pyxie',
       entry_points={'console_scripts': [
-                        'pyxie = pyxie.gui.app:main'
+                        'pyxie-trackeditor = pyxie.gui.trackeditor:main'
                         ],
                     },
       )
