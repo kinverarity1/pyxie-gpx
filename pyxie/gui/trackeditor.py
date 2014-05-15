@@ -2,6 +2,11 @@ import argparse
 import datetime
 import logging
 import os
+import re
+try:
+    import cStringIO as StringIO
+except ImportError:
+    import StringIO
 import sys
 
 from matplotlib import dates
@@ -56,16 +61,28 @@ class TrackEditorMainWindow(MainWindow):
         set_gui_style = self.create_action(text='Flip orientation', slot=self.slot_flip_gui_direction)
         exit = self.create_action(text='E&xit', shortcut='Alt+F4', slot=self.slot_exit)
         about = self.create_action(text='&About...', shortcut='F1', slot=self.slot_about)
+               
         menubar = self.menuBar()
         file_menu = menubar.addMenu('&File')
         view_menu = menubar.addMenu('&View')
         help_menu = menubar.addMenu('&Help')
         self.add_actions(file_menu, [open_track, exit])
-        self.add_actions(view_menu, [set_gui_style])
+        self.add_actions(view_menu, [set_gui_style, ])
         self.add_actions(help_menu, [about])
         
         main_widget = QtGui.QWidget(self)
-        main_layout = QtGui.QVBoxLayout(main_widget)
+        main_layout = QtGui.QHBoxLayout(main_widget)
+        self.main_tab = QtGui.QTabWidget(main_widget)
+        
+        self.gpx_edit = QtGui.QTextEdit()
+        self.gpx_edit.acceptRichText = False
+        self.gpx_edit.setFontFamily('monospace')
+        tidygpxbutton = QtGui.QPushButton('Reformat GPX with helpful linebreaks')
+        tidygpxbutton.clicked.connect(self.slot_tidy_gpx)
+        gpxeditwidget = QtGui.QWidget()
+        gpxeditlayout = QtGui.QVBoxLayout(gpxeditwidget)
+        gpxeditlayout.addWidget(tidygpxbutton)
+        gpxeditlayout.addWidget(self.gpx_edit)
         
         self.map = TrackMap(5, 5)
         self.graph = TrackGraph(5, 5, **graph_kws)
@@ -76,8 +93,20 @@ class TrackEditorMainWindow(MainWindow):
             splitter.setOrientation(Qt.Horizontal)
         splitter.addWidget(self.map)
         splitter.addWidget(self.graph)
+
+        self.main_tab.addTab(splitter, 'Map and graph')
+        self.gpx_edit_ti = self.main_tab.addTab(gpxeditwidget, 'GPX file')
         
-        main_layout.addWidget(splitter)
+        self.stats_widget = QtGui.QTextEdit(self)
+        self.stats_widget.setReadOnly(True)
+        
+        #main_layout.addWidget(splitter)
+        statsplitter = QtGui.QSplitter(main_widget)
+        statsplitter.setOrientation(Qt.Horizontal)
+        statsplitter.addWidget(self.main_tab)
+        statsplitter.addWidget(self.stats_widget)
+        
+        main_layout.addWidget(statsplitter)
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
                 
@@ -131,12 +160,29 @@ class TrackEditorMainWindow(MainWindow):
         if os.path.isdir(dirname):
             self.dirnames.append(dirname)
         self.track_fn = fn
-        self.coords = io.read_gpx(fn)
+        with open(fn, mode='r') as f:
+            s = f.read()
+            #s = re.sub(r'pt><tr', r'pt>\\n<tr', s)
+        self.open_gpx_txt(s)
+        
+    def slot_tidy_gpx(self):
+        self.track_txt = re.sub(r'><', r'>\n<', self.track_txt)
+        self.track_txt = re.sub(r'\n<ele>', r'\n  <ele>', self.track_txt)
+        self.track_txt = re.sub(r'\n<time>', r'\n  <time>', self.track_txt)
+        self.slot_show_gpx_in_tab()
+        
+    def open_gpx_txt(self, text):
+        self.coords = io.read_gpx(StringIO.StringIO(text))
+        self.track_txt = text
         if self.graph:
             self.graph.xlim = (None, None)
             self.graph.ylim = (None, None)
-        logger.info('Read %d points from %s' % (self.coords.shape[0], fn))
+        self.slot_show_gpx_in_tab()
         self.refresh()
+        
+    def slot_show_gpx_in_tab(self):
+        self.gpx_edit.clear()
+        self.gpx_edit.insertPlainText(self.track_txt)
         
     def refresh(self):
         for callback in self.callbacks.values():
@@ -163,6 +209,7 @@ class TrackEditorMainWindow(MainWindow):
                 callback.connect()
             self.callbacks[label] = callback
         
+        self.write_stats()
         self.setWindowTitle('%s : %s' % (program_name, self.track_fn))
    
     def slot_exit(self):
@@ -176,6 +223,14 @@ class TrackEditorMainWindow(MainWindow):
                         'prog': program_name,
                         'version': pyxie.__version__,
                         })
+                        
+    def write_stats(self):
+        # 0      1     2     3
+        # times, lons, lats, elevs
+        # times = seconds since epochs
+        self.stats = stats.Path(self.map.xs, self.map.ys, self.coords[:, 0])
+        self.stats_widget.clear()
+        self.stats_widget.insertPlainText(str(self.stats))
     
     
     
