@@ -20,6 +20,7 @@ from .. import io
 from .. import core
 from .. import stats
 from ..config import config
+from . import qt
 from .qt import QtGui, QtCore, Qt, MainWindow, MplCanvas, ExtendedCombo
 
 
@@ -27,8 +28,8 @@ from .qt import QtGui, QtCore, Qt, MainWindow, MplCanvas, ExtendedCombo
 program_name = 'Pyxie Track Editor'
 
 logger = logging.getLogger(__name__)
-
-
+        
+        
         
 class TrackEditorMainWindow(MainWindow):
     def __init__(self, split_direction='horizontal', file=None, 
@@ -56,7 +57,12 @@ class TrackEditorMainWindow(MainWindow):
             graph_kws = {}
         self.split_direction = split_direction
             
-        open_track = self.create_action(text='Open track...', shortcut='Ctrl+O', slot=self.slot_open_track)
+        open_track = self.create_action(
+                text='Open track...', shortcut='Ctrl+O', 
+                slot=self.slot_open_track)
+        save = self.create_action(
+                text='Save track', shortcut='Ctrl+S',
+                slot=self.slot_save_track)
         # show_callbacks_dialog = self.create_action(text='Enable/disable graph features...', slot=self.slot_show_callbacks_dialog)
         set_gui_style = self.create_action(text='Flip orientation', slot=self.slot_flip_gui_direction)
         exit = self.create_action(text='E&xit', shortcut='Alt+F4', slot=self.slot_exit)
@@ -66,7 +72,7 @@ class TrackEditorMainWindow(MainWindow):
         file_menu = menubar.addMenu('&File')
         view_menu = menubar.addMenu('&View')
         help_menu = menubar.addMenu('&Help')
-        self.add_actions(file_menu, [open_track, exit])
+        self.add_actions(file_menu, [open_track, save, exit])
         self.add_actions(view_menu, [set_gui_style, ])
         self.add_actions(help_menu, [about])
         
@@ -165,6 +171,10 @@ class TrackEditorMainWindow(MainWindow):
             #s = re.sub(r'pt><tr', r'pt>\\n<tr', s)
         self.open_gpx_txt(s)
         
+    def slot_save_track(self):
+        with open(self.track_fn, mode='w') as f:
+            f.write(self.track_txt)
+        
     def slot_tidy_gpx(self):
         self.track_txt = re.sub(r'><', r'>\n<', self.track_txt)
         self.track_txt = re.sub(r'\n<ele>', r'\n  <ele>', self.track_txt)
@@ -172,17 +182,25 @@ class TrackEditorMainWindow(MainWindow):
         self.slot_show_gpx_in_tab()
         
     def open_gpx_txt(self, text):
-        self.coords = io.read_gpx(StringIO.StringIO(text))
         self.track_txt = text
+        self.coords = io.read_gpx(StringIO.StringIO(text))
         if self.graph:
             self.graph.xlim = (None, None)
             self.graph.ylim = (None, None)
         self.slot_show_gpx_in_tab()
         self.refresh()
         
+    def slot_gpx_text_changed(self):
+        self.open_gpx_txt(str(self.gpx_edit.document().toPlainText()))
+        
     def slot_show_gpx_in_tab(self):
+        try:
+            self.gpx_edit.textChanged.disconnect(self.slot_gpx_text_changed)
+        except:
+            pass
         self.gpx_edit.clear()
         self.gpx_edit.insertPlainText(self.track_txt)
+        self.gpx_edit.textChanged.connect(self.slot_gpx_text_changed)
         
     def refresh(self):
         for callback in self.callbacks.values():
@@ -218,11 +236,16 @@ class TrackEditorMainWindow(MainWindow):
     def slot_about(self):
         QtGui.QMessageBox.about(
                 self, 'About ' + program_name,
-                '%(prog)s version %(version)s\n\n'
-                '' % {
-                        'prog': program_name,
-                        'version': pyxie.__version__,
-                        })
+                '''Python GUI tools for viewing (and editing in the future) GPX tracks.
+
+There are already innumerable tools out there for looking at walk/cycle/drive 
+data, but I found myself stuck when I don't have internet access and all I want
+to do is look at, perhaps edit, and see general information about a trip I've 
+taken. Also just fun to play around with it and learn more about building 
+software with a GUI.
+
+Another thing is splitting and cleaning GPX tracks. I want to be able to do it 
+visually but I always seem to end up manually editing the XML file (!)''')
                         
     def write_stats(self):
         # 0      1     2     3
@@ -308,7 +331,7 @@ class LinkLocationCallback(CallbackHandler):
     
     def on_graph_motion(self, event):
         graph = self.parent.graph
-        if event.inaxes is graph.ax:
+        if event.inaxes is graph.ax or event.inaxes is graph.ax2:
             index = (np.abs(np.array(graph.mpl_dts) - event.xdata)).argmin()
             self.update_markers(index)
             # logger.debug('graph motion i=%s at time %s' % (index, num2date(event.xdata)))
@@ -319,10 +342,17 @@ class LinkLocationCallback(CallbackHandler):
         
         if not 'link_location_marker' in graph.artists:
             graph.artists['link_location_marker'] = graph.ax.plot(
-                    [graph.mpl_dts[i]], [graph.speeds[i]], marker='o', mfc='k', mec='k')[0]
+                    [graph.mpl_dts[i]], [graph.speeds[i]], marker='o', mfc='gray', mec='k')[0]
         else:
             graph.artists['link_location_marker'].set_xdata([graph.mpl_dts[i]])
             graph.artists['link_location_marker'].set_ydata([graph.speeds[i]])
+            
+        if not 'link_location_marker_elev' in graph.artists:
+            graph.artists['link_location_marker_elev'] = graph.ax2.plot(
+                    [graph.mpl_dts[i]], [graph.elevs[i]], marker='o', mfc='red', mec='k')[0]
+        else:
+            graph.artists['link_location_marker_elev'].set_xdata([graph.mpl_dts[i]])
+            graph.artists['link_location_marker_elev'].set_ydata([graph.elevs[i]])
         
         if not 'link_location_marker' in map.artists:
             map.artists['link_location_marker'] = map.ax.plot(
@@ -580,7 +610,7 @@ class TrackGraph(QtGui.QWidget):
         
         mpl_dts = np.array(dates.date2num(dts_localised))
         self.artists['line'] = self.ax.plot_date(
-                mpl_dts, speeds, ls='-', marker='None', tz=self.tz)[0]
+                mpl_dts, speeds, ls='-', color='k', marker='None', tz=self.tz)[0]
         dt_fmt = '%Y-%m-%d %H:%M:%S'
         self.ax.fmt_xdata = dates.DateFormatter(dt_fmt, tz=self.tz)
         
@@ -611,10 +641,11 @@ class TrackGraph(QtGui.QWidget):
         
         self.mpl_dts = mpl_dts
         self.speeds = speeds
-        
+        self.elevs = self.coords[:, 3]
+        self.artists['line_elev'] = self.ax2.plot_date(
+                mpl_dts, self.elevs, ls='-', color='r', 
+                marker='None', tz=self.tz)[0]
         self.draw()
-        
-        print stats.Path(xs, ys, times=mpl_dts)
     
     def clear(self, axis='off'):
         for artist in self.artists.values():
@@ -622,9 +653,14 @@ class TrackGraph(QtGui.QWidget):
         self.artists.clear()
         if 'ax' in self.__dict__:
             self.canvas.fig.delaxes(self.ax)
+        if 'ax2' in self.__dict__:
+            self.canvas.fig.delaxes(self.ax2)
         self.ax = self.canvas.fig.add_axes([0.05, 0.1, 0.85, 0.94])
+        self.ax2 = self.ax.twinx()
         self.ax.axis(axis)
-        self.ax.set_aspect(aspect='auto', adjustable='datalim')
+        self.ax2.axis(axis)
+        for ax in (self.ax, self.ax2):
+            ax.set_aspect(aspect='auto', adjustable='datalim')
         
     def draw(self):
         self.canvas.draw_idle()
@@ -648,6 +684,7 @@ def main():
     kwargs = {'file': args.file}
     
     app = QtGui.QApplication([])
+    app.setApplicationName(program_name)
     app.setStyle(QtGui.QStyleFactory.create('GTK'))
     app.setPalette(QtGui.QApplication.style().standardPalette())
     window = TrackEditorMainWindow(**kwargs)
