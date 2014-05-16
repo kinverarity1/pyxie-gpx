@@ -1,3 +1,13 @@
+'''Python GUI tools for viewing (and editing in the future) GPX tracks.
+
+There are already innumerable tools out there for looking at walk/cycle/drive 
+data, but I found myself stuck when I don't have internet access and all I want
+to do is look at, perhaps edit, and see general information about a trip I've 
+taken. Also just fun to play around with it and learn more about building 
+software with a GUI.
+
+Another thing is splitting and cleaning GPX tracks. I want to be able to do it 
+visually but I always seem to end up manually editing the XML file (!)'''
 import argparse
 import datetime
 import logging
@@ -16,10 +26,11 @@ from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as Navigatio
 import numpy as np
 from pytz import timezone, common_timezones
 
+from ..config import config
 from .. import io
 from .. import core
 from .. import stats
-from ..config import config
+from .. import utils
 from . import qt
 from .qt import QtGui, QtCore, Qt, MainWindow, MplCanvas, ExtendedCombo
 
@@ -31,155 +42,212 @@ logger = logging.getLogger(__name__)
         
         
         
-class TrackEditorMainWindow(MainWindow):
-    def __init__(self, split_direction='horizontal', file=None, 
-                 graph_kws=None, dirname=None):
-        MainWindow.__init__(self)
-        logger.debug('__init__ split_direction=%s file=%s' % (
-                split_direction, file))
-        self.track_fn = file
+class TrackEditorMainWindow(qt.MainWindow):
+    '''Main GUI for Pyxie.
+
+    The GUI has three panels: 
+
+        1. On the left-hand side a way to select the data you want (e.g. select
+           a GPX file, or a time period);
+        2. In the centre show the data: e.g. with a map, a graph vs time or distance,
+           and the text of the GPX file itself, or perhaps a table of coordinates.
+        3. On the right-hand side show statistics of the data (total travel time, etc.)
+           and also any filters that are or need to be applied to the data.
+
+    The only keyword arguments that can be passed to this class constructor are ones that
+    define how the GUI starts:
+
+        - *file*: track file to load initially.
+        - *cwd*: current working directory
+        - and any of the method `ui_init`'s keyword arguments
+
+    '''
+    def __init__(self, **kws):
+        qt.MainWindow.__init__(self)
+        ks = {'file': None,
+              'cwd': os.getcwd()}
+        ks.update(kws)
+        
         self.map = None
         self.graph = None
-        if dirname is None:
-            dirname = os.getcwd()
-        self.dirnames = [dirname]
+
+        self.cwds = [ks['cwd']]
+
         self.dialogs = {}
         self.callbacks = {}
-        self.split_direction = split_direction
-        self.init_ui(split_direction=split_direction,
-                     graph_kws=graph_kws)
-        if self.track_fn:
-            self.open_track(self.track_fn)
-                
         
-    def init_ui(self, split_direction='horizontal', graph_kws=None):
-        if graph_kws is None:
-            graph_kws = {}
-        self.split_direction = split_direction
-            
-        open_track = self.create_action(
-                text='Open track...', shortcut='Ctrl+O', 
-                slot=self.slot_open_track)
-        save = self.create_action(
-                text='Save track', shortcut='Ctrl+S',
-                slot=self.slot_save_track)
-        # show_callbacks_dialog = self.create_action(text='Enable/disable graph features...', slot=self.slot_show_callbacks_dialog)
-        set_gui_style = self.create_action(text='Flip orientation', slot=self.slot_flip_gui_direction)
-        exit = self.create_action(text='E&xit', shortcut='Alt+F4', slot=self.slot_exit)
-        about = self.create_action(text='&About...', shortcut='F1', slot=self.slot_about)
-               
-        menubar = self.menuBar()
-        file_menu = menubar.addMenu('&File')
-        view_menu = menubar.addMenu('&View')
-        help_menu = menubar.addMenu('&Help')
-        self.add_actions(file_menu, [open_track, save, exit])
-        self.add_actions(view_menu, [set_gui_style, ])
-        self.add_actions(help_menu, [about])
-        
-        main_widget = QtGui.QWidget(self)
-        main_layout = QtGui.QHBoxLayout(main_widget)
-        self.main_tab = QtGui.QTabWidget(main_widget)
-        
-        self.gpx_edit = QtGui.QTextEdit()
-        self.gpx_edit.acceptRichText = False
-        self.gpx_edit.setFontFamily('monospace')
-        tidygpxbutton = QtGui.QPushButton('Reformat GPX with helpful linebreaks')
-        tidygpxbutton.clicked.connect(self.slot_tidy_gpx)
-        gpxeditwidget = QtGui.QWidget()
-        gpxeditlayout = QtGui.QVBoxLayout(gpxeditwidget)
-        gpxeditlayout.addWidget(tidygpxbutton)
-        gpxeditlayout.addWidget(self.gpx_edit)
-        
-        self.map = TrackMap(5, 5)
-        self.graph = TrackGraph(5, 5, **graph_kws)
-        splitter = QtGui.QSplitter(main_widget)
-        if split_direction == 'horizontal':
-            splitter.setOrientation(Qt.Vertical)
-        elif split_direction == 'vertical':
-            splitter.setOrientation(Qt.Horizontal)
-        splitter.addWidget(self.map)
-        splitter.addWidget(self.graph)
+        self.ui_init(**ks)
 
-        self.main_tab.addTab(splitter, 'Map and graph')
-        self.gpx_edit_ti = self.main_tab.addTab(gpxeditwidget, 'GPX file')
+        if ks['file'] is not None:
+            self.open_track(file=ks['file'])
+   
         
-        self.stats_widget = QtGui.QTextEdit(self)
-        self.stats_widget.setReadOnly(True)
-        
-        #main_layout.addWidget(splitter)
-        statsplitter = QtGui.QSplitter(main_widget)
-        statsplitter.setOrientation(Qt.Horizontal)
-        statsplitter.addWidget(self.main_tab)
-        statsplitter.addWidget(self.stats_widget)
-        
-        main_layout.addWidget(statsplitter)
-        main_widget.setLayout(main_layout)
-        self.setCentralWidget(main_widget)
-                
-        self.map.clear()
-        self.graph.clear(axis='off')
+    def ui_init(self, **kws):
+        '''Initialise GUI.
+
+        Keyword arguments:
+
+            - *split_direction*: either 'horizontal' (the default) or 'vertical' - defines
+              how the map and time/distance graph are arranged.
+            - *graph_kws*: dict.
+
+        '''
+            
+        self.ui_init_actions(**kws)
+        self.ui_init_menu(**kws)
+        self.ui_init_widgets(**kws)
         
         self.setGeometry(400, 50, 900, 650) # debug
-        # self.showMaximized()
         self.setWindowTitle(program_name)
         
-        self.statusbar = QtGui.QStatusBar(self)
+        self.statusbar = qt.QtGui.QStatusBar(self)
         self.setStatusBar(self.statusbar)
         
         self.show()
+
+    def ui_init_actions(self, **kws):
+        self.actions = utils.NamedDict()
+        self.actions.open_track = self.create_action('Open track...', shortcut='Ctrl+O')
+        self.actions.open_track.triggered.connect(self.slot_open_track)
+        self.actions.save_track = self.create_action('Save track', shortcut='Ctrl+S')
+        self.actions.save_track.triggered.connect(self.slot_save_track)
+        self.actions.flip_split_direction = self.create_action('Flip graph orientation')
+        self.actions.flip_split_direction.triggered.connect(self.slot_flip_split_direction)
+        self.actions.exit = self.create_action('E&xit', shortcut='Alt+F4')
+        self.actions.exit.triggered.connect(self.slot_exit)
+        self.actions.about = self.create_action('&About', shortcut='F1')
+        self.actions.about.triggered.connect(self.slot_about)
+
+    def ui_init_menu(self, **kws):
+        self.menu = utils.NamedDict()
+        self.menu.bar = self.menuBar()
+        self.menu.file = self.menu.bar.addMenu('&File')
+        self.menu.view = self.menu.bar.addMenu('&View')
+        self.menu.help = self.menu.bar.addMenu('&Help')
+        self.add_actions(self.menu.file, [self.actions.open_track, self.actions.save_track, self.actions.exit])
+        self.add_actions(self.menu.view, [self.actions.flip_split_direction])
+        self.add_actions(self.menu.help, [self.actions.about])
+
+    def ui_init_widgets(self, **kws):
+        ks = {'split_direction': 'horizontal',
+              'graph_kws': {}}
+        ks.update(kws)
+
+        self.widgets = utils.NamedDict()
+        self.widgets.mainwindow_central = qt.QtGui.QWidget(self)
+        self.widgets.centre_tab = qt.QtGui.QTabWidget(self.widgets.mainwindow_central)
+        self.widgets.map = TrackMap(5, 5)
+        self.widgets.graph = TrackGraph(5, 5, **ks['graph_kws'])
+        self.widgets.gpx_editor = qt.QtGui.QWidget(self.widgets.centre_tab)
+        self.widgets.gpx_edit_box = qt.QtGui.QTextEdit(self.widgets.gpx_editor)
+        self.widgets.gpx_edit_box.acceptRichText = False
+        self.widgets.gpx_edit_box.setFontFamily('monospace')
+        self.widgets.gpx_reformat_button = qt.QtGui.QPushButton('Reformat GPX with helpful linebreaks',
+                                                                self.widgets.gpx_editor)
+        self.widgets.gpx_reformat_button.clicked.connect(self.slot_reformat_gpx)
+        self.widgets.stats_box = QtGui.QTextEdit(self)
+        self.widgets.stats_box.setReadOnly(True)
+
+        self.widgets.map_graph_splitter = QtGui.QSplitter(self.widgets.centre_tab)
+        self.widgets.map_graph_splitter.setOrientation({'horizontal': Qt.Vertical, 'vertical': Qt.Horizontal}[ks['split_direction']])
+        self.widgets.map_graph_splitter.addWidget(self.widgets.map)
+        self.widgets.map_graph_splitter.addWidget(self.widgets.graph)
+
+        self.widgets.main_window_splitter = QtGui.QSplitter(self.widgets.mainwindow_central)
+        self.widgets.main_window_splitter.setOrientation(Qt.Horizontal)
+        self.widgets.main_window_splitter.addWidget(self.widgets.centre_tab)
+        self.widgets.main_window_splitter.addWidget(self.widgets.stats_box)
+
+        # Create layouts and order widgets in them.
+
+        layout_gpx_editor = QtGui.QVBoxLayout(self.widgets.gpx_editor)
+        layout_gpx_editor.addWidget(self.widgets.gpx_reformat_button)
+        layout_gpx_editor.addWidget(self.widgets.gpx_edit_box)
+
+        self.widgets.centre_tab.addTab(self.widgets.map_graph_splitter, 'Map and graph')
+        self.widgets.centre_tab.addTab(self.widgets.gpx_editor, 'GPX editor')
         
+        layout_main_window = qt.QtGui.QHBoxLayout(self.widgets.mainwindow_central)
+        layout_main_window.addWidget(self.widgets.main_window_splitter)
+        self.widgets.mainwindow_central.setLayout(layout_main_window)
+        self.setCentralWidget(self.widgets.mainwindow_central)
+                
+        self.map = self.widgets.map
+        self.graph = self.widgets.graph
+
+        self.map.clear()
+        self.graph.clear(axis='off')
+
     def slot_show_callbacks_dialog(self):
         if not 'callbacks' in self.dialogs:
             self.dialogs['callbacks'] = CallbacksDialog(self)
         self.dialogs['callbacks'].show()
         self.dialogs['callbacks'].activateWindow()
    
-    def slot_flip_gui_direction(self):
-        logger.debug('flipping gui direction')
-        if self.split_direction == 'horizontal':
+    def slot_flip_split_direction(self):
+        if self.ui_setup['split_direction'] == 'horizontal':
             new_split_dir = 'vertical'
-        elif self.split_direction == 'vertical':
+        elif self.ui_setup['split_direction'] == 'vertical':
             new_split_dir = 'horizontal'
         self.close()
-        self.__init__(split_direction=new_split_dir, 
-                      dirname=self.dirnames[-1],
-                      file=self.track_fn,
-                      graph_kws=dict(xlim=self.graph.xlim,
-                                     ylim=self.graph.ylim))
+        kws = {'cwd': self.cwds[-1],
+               'file': self.file,
+               'split_direction': new_split_dir,
+               'graph_kws': {'xlim': self.graph.xlim,
+                             'ylim': self.graph.ylim}}
+        self.__init__(**kws)
    
     def slot_open_track(self):
-        logger.debug('Asking for track fn')
-        dialog = QtGui.QFileDialog()
-        dialog.setFileMode(QtGui.QFileDialog.ExistingFile)
+        dialog = qt.QtGui.QFileDialog()
+        dialog.setFileMode(qt.QtGui.QFileDialog.ExistingFile)
         fn = dialog.getOpenFileName(self,
-                'Import track file', self.dirnames[-1],
+                'Import track file', self.cwds[-1],
                 'GPS Exchange Format (*.gpx)'
                 )
-        return self.open_track(fn)
-        
-    def open_track(self, fn):
-        fn = str(fn)
-        logger.debug('Opening track_fn %s' % fn)
-        if not os.path.isfile(fn):
-            return
-        dirname = os.path.split(fn)[0]
-        if os.path.isdir(dirname):
-            self.dirnames.append(dirname)
-        self.track_fn = fn
-        with open(fn, mode='r') as f:
-            s = f.read()
-            #s = re.sub(r'pt><tr', r'pt>\\n<tr', s)
-        self.open_gpx_txt(s)
+        self.open_track(fn)
         
     def slot_save_track(self):
-        with open(self.track_fn, mode='w') as f:
+        with open(self.file, mode='w') as f:
             f.write(self.track_txt)
         
-    def slot_tidy_gpx(self):
+    def slot_reformat_gpx(self):
         self.track_txt = re.sub(r'><', r'>\n<', self.track_txt)
         self.track_txt = re.sub(r'\n<ele>', r'\n  <ele>', self.track_txt)
         self.track_txt = re.sub(r'\n<time>', r'\n  <time>', self.track_txt)
         self.slot_show_gpx_in_tab()
+
+    def slot_gpx_text_changed(self):
+        self.open_gpx_txt(str(self.widgets.gpx_edit_box.document().toPlainText()))
+        
+    def slot_show_gpx_in_tab(self):
+        try:
+            self.widgets.gpx_edit_box.textChanged.disconnect(self.slot_gpx_text_changed)
+        except:
+            pass
+        self.widgets.gpx_edit_box.clear()
+        self.widgets.gpx_edit_box.insertPlainText(self.track_txt)
+        self.widgets.gpx_edit_box.textChanged.connect(self.slot_gpx_text_changed)
+
+    def slot_exit(self):
+        self.close()
+    
+    def slot_about(self):
+        QtGui.QMessageBox.about(
+                self, 'About ' + program_name, __doc__)
+        
+    def open_track(self, file):
+        file = str(file)
+        if not os.path.isfile(file):
+            print('Cannot open %s : is not a file.' % file)
+            return
+        fndir = os.path.split(file)[0]
+        if os.path.isdir(fndir):
+            self.cwds.append(fndir)
+        with open(file, mode='r') as f:
+            s = f.read()
+        self.file = file
+        self.open_gpx_txt(s)
+        
         
     def open_gpx_txt(self, text):
         self.track_txt = text
@@ -188,21 +256,10 @@ class TrackEditorMainWindow(MainWindow):
             self.graph.xlim = (None, None)
             self.graph.ylim = (None, None)
         self.slot_show_gpx_in_tab()
-        self.refresh()
+        self.refresh_figures()
         
-    def slot_gpx_text_changed(self):
-        self.open_gpx_txt(str(self.gpx_edit.document().toPlainText()))
-        
-    def slot_show_gpx_in_tab(self):
-        try:
-            self.gpx_edit.textChanged.disconnect(self.slot_gpx_text_changed)
-        except:
-            pass
-        self.gpx_edit.clear()
-        self.gpx_edit.insertPlainText(self.track_txt)
-        self.gpx_edit.textChanged.connect(self.slot_gpx_text_changed)
-        
-    def refresh(self):
+
+    def refresh_figures(self):
         for callback in self.callbacks.values():
             callback.disconnect()
         self.callbacks.clear()
@@ -217,7 +274,6 @@ class TrackEditorMainWindow(MainWindow):
         self.graph.clear(axis='on')
         self.graph.coords = self.coords
         self.graph.plot()
-        logger.debug('Mapping %s' % self.track_fn)
         
         callbacks = [('link_location', LinkLocationCallback, [self], True),
                      ('link_axes_limits', ChangeLimitsCallback, [self], True)]
@@ -228,33 +284,12 @@ class TrackEditorMainWindow(MainWindow):
             self.callbacks[label] = callback
         
         self.write_stats()
-        self.setWindowTitle('%s : %s' % (program_name, self.track_fn))
+        self.setWindowTitle('%s : %s' % (program_name, self.file))
    
-    def slot_exit(self):
-        self.close()
-    
-    def slot_about(self):
-        QtGui.QMessageBox.about(
-                self, 'About ' + program_name,
-                '''Python GUI tools for viewing (and editing in the future) GPX tracks.
-
-There are already innumerable tools out there for looking at walk/cycle/drive 
-data, but I found myself stuck when I don't have internet access and all I want
-to do is look at, perhaps edit, and see general information about a trip I've 
-taken. Also just fun to play around with it and learn more about building 
-software with a GUI.
-
-Another thing is splitting and cleaning GPX tracks. I want to be able to do it 
-visually but I always seem to end up manually editing the XML file (!)''')
-                        
     def write_stats(self):
-        # 0      1     2     3
-        # times, lons, lats, elevs
-        # times = seconds since epochs
         self.stats = stats.Path(self.map.xs, self.map.ys, self.coords[:, 0])
-        self.stats_widget.clear()
-        self.stats_widget.insertPlainText(str(self.stats))
-    
+        self.widgets.stats_box.clear()
+        self.widgets.stats_box.insertPlainText(str(self.stats))
     
     
 class CallbacksDialog(QtGui.QDialog):
