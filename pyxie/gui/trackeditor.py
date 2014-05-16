@@ -32,17 +32,16 @@ from .. import core
 from .. import stats
 from .. import utils
 from . import qt
-from .qt import QtGui, QtCore, Qt, MainWindow, MplCanvas, ExtendedCombo
 
 
-
-program_name = 'Pyxie Track Editor'
+APP_NAME = 'Pyxie Track Editor'
+TRACKS_DIR = config.get('paths', 'default_tracks')
+EXTENSIONS = ['gpx', 'kml', 'kmz']
 
 logger = logging.getLogger(__name__)
+                
         
-        
-        
-class TrackEditorMainWindow(qt.MainWindow):
+class TrackEditor(qt.MainWindow):
     '''Main GUI for Pyxie.
 
     The GUI has three panels: 
@@ -65,6 +64,7 @@ class TrackEditorMainWindow(qt.MainWindow):
     def __init__(self, **kws):
         qt.MainWindow.__init__(self)
         ks = {'file': None,
+              'tracks_dir': TRACKS_DIR,
               'cwd': os.getcwd()}
         ks.update(kws)
         
@@ -98,7 +98,8 @@ class TrackEditorMainWindow(qt.MainWindow):
         self.ui_init_widgets(**kws)
         
         self.setGeometry(400, 50, 900, 650) # debug
-        self.setWindowTitle(program_name)
+        self.showMaximized()
+        self.setWindowTitle(APP_NAME)
         
         self.statusbar = qt.QtGui.QStatusBar(self)
         self.setStatusBar(self.statusbar)
@@ -132,10 +133,23 @@ class TrackEditorMainWindow(qt.MainWindow):
         ks = {'split_direction': 'horizontal',
               'graph_kws': {}}
         ks.update(kws)
+        self.split_direction = ks['split_direction']
 
         self.widgets = utils.NamedDict()
         self.widgets.mainwindow_central = qt.QtGui.QWidget(self)
+        self.widgets.gpx_files = qt.QtGui.QWidget(self.widgets.mainwindow_central)
+        self.widgets.gpx_files_path_select_button = qt.QtGui.QPushButton('', self.widgets.gpx_files)
+        self.widgets.gpx_files_path_select_button.clicked.connect(self.slot_select_gpx_files_path)
+        self.widgets.gpx_files_query = qt.QtGui.QWidget(self.widgets.gpx_files)
+        self.widgets.gpx_files_query_label = qt.QtGui.QLabel('Filter files by:')
+        self.widgets.gpx_files_query_box = qt.QtGui.QLineEdit(self.widgets.gpx_files)
+        self.widgets.gpx_files_query_box.textEdited.connect(self.slot_query_gpx_files_tree)
+        self.widgets.gpx_files_tree = qt.QtGui.QTreeView(self.widgets.gpx_files)
+
         self.widgets.centre_tab = qt.QtGui.QTabWidget(self.widgets.mainwindow_central)
+        self.widgets.centre = qt.QtGui.QWidget()
+        # self.widgets.file_load_progress = qt.QtGui.QProgressBar()
+        
         self.widgets.map = TrackMap(5, 5)
         self.widgets.graph = TrackGraph(5, 5, **ks['graph_kws'])
         self.widgets.gpx_editor = qt.QtGui.QWidget(self.widgets.centre_tab)
@@ -145,38 +159,108 @@ class TrackEditorMainWindow(qt.MainWindow):
         self.widgets.gpx_reformat_button = qt.QtGui.QPushButton('Reformat GPX with helpful linebreaks',
                                                                 self.widgets.gpx_editor)
         self.widgets.gpx_reformat_button.clicked.connect(self.slot_reformat_gpx)
-        self.widgets.stats_box = QtGui.QTextEdit(self)
+        self.widgets.stats = qt.QtGui.QWidget()
+        self.widgets.stats_box = qt.QtGui.QTextEdit(self)
         self.widgets.stats_box.setReadOnly(True)
 
-        self.widgets.map_graph_splitter = QtGui.QSplitter(self.widgets.centre_tab)
-        self.widgets.map_graph_splitter.setOrientation({'horizontal': Qt.Vertical, 'vertical': Qt.Horizontal}[ks['split_direction']])
+        self.widgets.map_graph_splitter = qt.QtGui.QSplitter(self.widgets.centre_tab)
+        self.widgets.map_graph_splitter.setOrientation(
+                {'horizontal': qt.Qt.Vertical, 'vertical': qt.Qt.Horizontal}[ks['split_direction']])
+
+        self.widgets.main_window_splitter = qt.QtGui.QSplitter(self.widgets.mainwindow_central)
+        self.widgets.main_window_splitter.setOrientation(qt.Qt.Horizontal)
+
+        # Create layouts and order widgets in them.
+        self.layouts = utils.NamedDict()
+
+        self.layouts.gpx_editor = qt.QtGui.QVBoxLayout(self.widgets.gpx_editor)
+        self.layouts.gpx_editor.addWidget(self.widgets.gpx_reformat_button)
+        self.layouts.gpx_editor.addWidget(self.widgets.gpx_edit_box)
+
         self.widgets.map_graph_splitter.addWidget(self.widgets.map)
         self.widgets.map_graph_splitter.addWidget(self.widgets.graph)
 
-        self.widgets.main_window_splitter = QtGui.QSplitter(self.widgets.mainwindow_central)
-        self.widgets.main_window_splitter.setOrientation(Qt.Horizontal)
-        self.widgets.main_window_splitter.addWidget(self.widgets.centre_tab)
-        self.widgets.main_window_splitter.addWidget(self.widgets.stats_box)
-
-        # Create layouts and order widgets in them.
-
-        layout_gpx_editor = QtGui.QVBoxLayout(self.widgets.gpx_editor)
-        layout_gpx_editor.addWidget(self.widgets.gpx_reformat_button)
-        layout_gpx_editor.addWidget(self.widgets.gpx_edit_box)
-
         self.widgets.centre_tab.addTab(self.widgets.map_graph_splitter, 'Map and graph')
         self.widgets.centre_tab.addTab(self.widgets.gpx_editor, 'GPX editor')
+
+        self.layouts.gpx_files = qt.QtGui.QVBoxLayout(self.widgets.gpx_files)
+        self.layouts.gpx_files.addWidget(self.widgets.gpx_files_path_select_button)
+        self.layouts.gpx_files.addWidget(self.widgets.gpx_files_query)
+        self.layouts.gpx_files.addWidget(self.widgets.gpx_files_tree)
+
+        self.layouts.gpx_files_query = qt.QtGui.QHBoxLayout(self.widgets.gpx_files_query)
+        self.layouts.gpx_files_query.addWidget(self.widgets.gpx_files_query_label)
+        self.layouts.gpx_files_query.addWidget(self.widgets.gpx_files_query_box)
+
+        self.layouts.centre = qt.QtGui.QVBoxLayout(self.widgets.centre)
+        # self.layouts.centre.addWidget(self.widgets.file_load_progress)
+        self.layouts.centre.addWidget(self.widgets.centre_tab)
+        # self.widgets.file_load_progress.hide()
+
+        self.widgets.main_window_splitter.addWidget(self.widgets.gpx_files)
+        self.widgets.main_window_splitter.addWidget(self.widgets.centre)
+        self.widgets.main_window_splitter.addWidget(self.widgets.stats_box)
         
-        layout_main_window = qt.QtGui.QHBoxLayout(self.widgets.mainwindow_central)
-        layout_main_window.addWidget(self.widgets.main_window_splitter)
-        self.widgets.mainwindow_central.setLayout(layout_main_window)
+        self.layouts.main_window = qt.QtGui.QHBoxLayout(self.widgets.mainwindow_central)
+        self.layouts.main_window.addWidget(self.widgets.main_window_splitter)
+        self.widgets.mainwindow_central.setLayout(self.layouts.main_window)
         self.setCentralWidget(self.widgets.mainwindow_central)
                 
         self.map = self.widgets.map
         self.graph = self.widgets.graph
 
+        self.init_gpx_files_tree(**ks)
+
         self.map.clear()
         self.graph.clear(axis='off')
+
+    def init_gpx_files_tree(self, **kws):
+        self.gpx_files_model = qt.QtGui.QFileSystemModel()
+        self.gpx_files_model_expanded_indices = []
+        self.widgets.gpx_files_tree.setModel(self.gpx_files_model)
+        self.widgets.gpx_files_tree.expanded.connect(self.slot_gpx_files_tree_item_expanded)
+        self.update_gpx_files_tree(**kws)
+
+    def update_gpx_files_tree(self, tracks_dir=None, filter=None, **kws):
+        if tracks_dir is None:
+            tracks_dir = self.widgets.gpx_files_path_select_button.text()
+        if filter is None:
+            filter = self.widgets.gpx_files_query_box.text()
+        model = self.gpx_files_model
+        tree = self.widgets.gpx_files_tree
+
+        model.setNameFilters([('*%s*.' % filter) + extension for extension in EXTENSIONS])
+        model.setNameFilterDisables(False)
+        model.setRootPath(tracks_dir)
+        
+        tree.setRootIndex(model.index(tracks_dir))
+        tree.header().setResizeMode(qt.QtGui.QHeaderView.ResizeToContents)
+        # tree.header().setResizeMode(qt.QtGui.QHeaderView.Interactive)
+        self.widgets.gpx_files_path_select_button.setText(tracks_dir)
+        tree.setSortingEnabled(True)
+        tree.doubleClicked.connect(self.slot_gpx_tree_file_selected)
+        #tree.setSelectionBehaviour(qt.QtGui.QAbstractItemView.SelectRows)
+        for index in self.gpx_files_model_expanded_indices:
+            tree.expand(index)
+
+    def slot_gpx_files_tree_item_expanded(self, index):
+        self.gpx_files_model_expanded_indices.append(index)
+
+    def slot_query_gpx_files_tree(self):
+        query = self.widgets.gpx_files_query_box.text()
+        self.update_gpx_files_tree(filter=query)
+
+    def slot_gpx_tree_file_selected(self, index):
+        model = self.gpx_files_model
+        selected_file = model.filePath(index)
+        self.open_track(file=selected_file)
+
+    def slot_select_gpx_files_path(self):
+        dialog = qt.QtGui.QFileDialog()
+        path = dialog.getExistingDirectory(self,
+                'Select folder containing GPX files', TRACKS_DIR,
+                )
+        self.update_gpx_files_tree(tracks_dir=path)
 
     def slot_show_callbacks_dialog(self):
         if not 'callbacks' in self.dialogs:
@@ -185,9 +269,9 @@ class TrackEditorMainWindow(qt.MainWindow):
         self.dialogs['callbacks'].activateWindow()
    
     def slot_flip_split_direction(self):
-        if self.ui_setup['split_direction'] == 'horizontal':
+        if self.split_direction == 'horizontal':
             new_split_dir = 'vertical'
-        elif self.ui_setup['split_direction'] == 'vertical':
+        elif self.split_direction == 'vertical':
             new_split_dir = 'horizontal'
         self.close()
         kws = {'cwd': self.cwds[-1],
@@ -232,10 +316,16 @@ class TrackEditorMainWindow(qt.MainWindow):
         self.close()
     
     def slot_about(self):
-        QtGui.QMessageBox.about(
-                self, 'About ' + program_name, __doc__)
+        qt.QtGui.QMessageBox.about(
+                self, 'About ' + APP_NAME, __doc__)
         
     def open_track(self, file):
+        # progress = qt.QtGui.QProgressDialog(self)
+        # progress.setRange(0, 1000)
+        # progress.setValue(0)
+        # progress.setMinimumDuration(0)
+        # progress.setWindowModality(Qt.WindowModal)
+        # progress.forceShow()
         file = str(file)
         if not os.path.isfile(file):
             print('Cannot open %s : is not a file.' % file)
@@ -247,6 +337,7 @@ class TrackEditorMainWindow(qt.MainWindow):
             s = f.read()
         self.file = file
         self.open_gpx_txt(s)
+        # progress.reset()
         
         
     def open_gpx_txt(self, text):
@@ -257,7 +348,8 @@ class TrackEditorMainWindow(qt.MainWindow):
             self.graph.ylim = (None, None)
         self.slot_show_gpx_in_tab()
         self.refresh_figures()
-        
+        # self.widgets.file_load_progress.hide()
+        # self.widgets.file_load_progress.setMaximum(10000)
 
     def refresh_figures(self):
         for callback in self.callbacks.values():
@@ -284,7 +376,7 @@ class TrackEditorMainWindow(qt.MainWindow):
             self.callbacks[label] = callback
         
         self.write_stats()
-        self.setWindowTitle('%s : %s' % (program_name, self.file))
+        self.setWindowTitle('%s : %s' % (APP_NAME, self.file))
    
     def write_stats(self):
         self.stats = stats.Path(self.map.xs, self.map.ys, self.coords[:, 0])
@@ -292,16 +384,16 @@ class TrackEditorMainWindow(qt.MainWindow):
         self.widgets.stats_box.insertPlainText(str(self.stats))
     
     
-class CallbacksDialog(QtGui.QDialog):
+class CallbacksDialog(qt.QtGui.QDialog):
     def __init__(self, parent, *args, **kwargs):
-        QtGui.QDialog.__init__(self, *args, **kwargs)
+        qt.QtGui.QDialog.__init__(self, *args, **kwargs)
         self.parent = parent
         self.init_ui()
         
     def init_ui(self):
-        main_layout = QtGui.QVBoxLayout(self)
+        main_layout = qt.QtGui.QVBoxLayout(self)
         for callback in self.parent.callbacks.values():
-            cb = QtGui.QCheckBox(callback.name, self)
+            cb = qt.QtGui.QCheckBox(callback.name, self)
             main_layout.addWidget(cb)
             cb.stateChanged.connect(callback.slot_state_changed)
             if callback.connected:
@@ -319,10 +411,10 @@ class CallbackHandler(object):
         
     def slot_state_changed(self, state):
         logger.debug('(%s) checkbox state changed' % self.name)
-        if state == Qt.Checked:
+        if state == qt.Qt.Checked:
             logger.debug('(%s) state=checked!' % self.name)
             self.connect()
-        elif state == Qt.Unchecked:
+        elif state == qt.Qt.Unchecked:
             logger.debug('(%s) state=UNchecked!' % self.name)
             self.disconnect()
 
@@ -555,15 +647,15 @@ class ChangeLimitsCallback(CallbackHandler):
         self.refresh_status = 'inactive'
     
     
-class TrackMap(QtGui.QWidget):
+class TrackMap(qt.QtGui.QWidget):
     def __init__(self, width, height, dpi=72):
-        QtGui.QWidget.__init__(self)
+        qt.QtGui.QWidget.__init__(self)
         self.coords = np.empty(shape=(0, 2))
         self.artists = {}
-        self.canvas = MplCanvas(self, width=width / float(dpi),
-                                height=height / float(dpi), dpi=dpi)
+        self.canvas = qt.MplCanvas(self, width=width / float(dpi),
+                                   height=height / float(dpi), dpi=dpi)
         self.mpl_toolbar = NavigationToolbar(self.canvas, self)
-        box = QtGui.QVBoxLayout()
+        box = qt.QtGui.QVBoxLayout()
         box.addWidget(self.mpl_toolbar)
         box.addWidget(self.canvas)
         self.setLayout(box)
@@ -594,27 +686,27 @@ class TrackMap(QtGui.QWidget):
     
         
         
-class TrackGraph(QtGui.QWidget):
+class TrackGraph(qt.QtGui.QWidget):
     def __init__(self, width, height, dpi=72, xlim=(None, None), ylim=(None, None)):
         logger.debug('TrackGraph __init__ xlim=%s ylim=%s' % (xlim, ylim))
-        QtGui.QWidget.__init__(self)
+        qt.QtGui.QWidget.__init__(self)
         self.coords = np.empty(shape=(0, 2))
         self.tz = timezone(config.get('datetime', 'default_timezone'))
         self.xlim = xlim
         self.ylim = ylim
         self.artists = {}
-        self.canvas = MplCanvas(self, width=width / float(dpi),
-                                height=height / float(dpi), dpi=dpi)
+        self.canvas = qt.MplCanvas(self, width=width / float(dpi),
+                                   height=height / float(dpi), dpi=dpi)
         self.mpl_toolbar = NavigationToolbar(self.canvas, self)
-        box = QtGui.QVBoxLayout()
+        box = qt.QtGui.QVBoxLayout()
         box.addWidget(self.mpl_toolbar)
         box.addWidget(self.canvas)
         self.setLayout(box)
         
-        tz_combo = ExtendedCombo(self.canvas.toolbar)
-        tz_model = QtGui.QStandardItemModel()
+        tz_combo = qt.ExtendedCombo(self.canvas.toolbar)
+        tz_model = qt.QtGui.QStandardItemModel()
         for i, tz in enumerate(common_timezones):
-            item = QtGui.QStandardItem(tz)
+            item = qt.QtGui.QStandardItem(tz)
             tz_model.setItem(i, 0, item)
         tz_combo.setModel(tz_model)
         tz_combo.setModelColumn(0)
@@ -713,16 +805,14 @@ def get_parser():
 def main():
     args = get_parser().parse_args(sys.argv[1:])
     
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    logging.basicConfig(format='%(levelname)s:%(name)s.%(funcName)s: %(message)s',
                         level=logging.DEBUG)
     logger = logging.getLogger(__name__)
     kwargs = {'file': args.file}
     
-    app = QtGui.QApplication([])
-    app.setApplicationName(program_name)
-    app.setStyle(QtGui.QStyleFactory.create('GTK'))
-    app.setPalette(QtGui.QApplication.style().standardPalette())
-    window = TrackEditorMainWindow(**kwargs)
+    app = qt.QtGui.QApplication([])
+    app.setApplicationName(APP_NAME)
+    window = TrackEditor(**kwargs)
     window.show()
     sys.exit(app.exec_())
 
