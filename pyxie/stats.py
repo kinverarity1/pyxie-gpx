@@ -13,7 +13,6 @@ def distances(xs, ys):
 def total_time(times):
     return np.sum(np.gradient(times))
 
-
 class Path(object):
     def __init__(s, xs, ys, times=None):
         if times is None:
@@ -43,5 +42,4 @@ class Path(object):
         sl += ['Speed - maximum: %.2f km/h' % 
                (s.max_spd / 1000. * 60. * 60.)]
         return '\n'.join(sl)
-        
         
