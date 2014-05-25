@@ -1,9 +1,20 @@
-from PyQt4 import QtGui, QtCore
-from PyQt4.QtCore import Qt
+import logging
+import os
+
+from PyQt4 import QtCore, QtGui
+
+Qt = QtCore.Qt
 
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+from .. import utils
+
+
+logger = logging.getLogger(__name__)
+
+QtCore.QCoreApplication.setOrganizationName('pyxie')
+QtCore.QCoreApplication.setOrganizationDomain('pyxie.com')
 
 
 class ActionHandler(object):
@@ -65,10 +76,43 @@ class Widget(ActionHandler, QtGui.QWidget):
                 
                 
 class MainWindow(ActionHandler, QtGui.QMainWindow):
-    '''QMainWindow wrapper -- see :class:`ActionHandler`.'''
-    def __init__(self, *args, **kwargs):
+    '''QMainWindow wrapper -- see :class:`ActionHandler`.
+
+    '''
+    def __init__(self, app_name='Application', **kwargs):
+        self.app_name = app_name
         ActionHandler.__init__(self)
-        QtGui.QMainWindow.__init__(self, *args, **kwargs)
+        QtGui.QMainWindow.__init__(self, **kwargs)
+        
+
+    def init_settings(self):
+        try:
+            self.restore_settings()
+        except:
+            utils.skip_exception('Failed to restore QSettings')
+
+
+    def restore_settings(self):
+        settings = QtCore.QSettings()
+        self.restoreGeometry(settings.value('geometry'))
+        self.restoreState(settings.value('windowState'))
+        # self.area.restoreState(settings.value('dockState'))
+        
+
+    def remember_settings(self):
+        settings = QtCore.QSettings()
+        settings.setValue("geometry", self.saveGeometry())
+        settings.setValue("windowState", self.saveState())
+        # settings.setValue('dockState', self.area.saveState())
+        
+
+    def closeEvent(self, event):
+        self.remember_settings()
+        QtGui.QMainWindow.closeEvent(self, event)
+        
+
+    def set_title_message(self, message):
+        self.setWindowTitle('%s - %s' % (self.app_name, message))
 
         
 

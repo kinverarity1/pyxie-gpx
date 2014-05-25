@@ -80,6 +80,13 @@ class TrackEditor(qt.MainWindow):
 
         if ks['file'] is not None:
             self.open_track(file=ks['file'])
+
+        self.init_settings()
+
+        if ks['cwd'] is not None:
+            if os.path.isdir(ks['cwd']):
+                settings = qt.QtCore.QSettings()
+                settings.setValue('lastDirectory', ks['cwd'])
    
         
     def ui_init(self, **kws):
