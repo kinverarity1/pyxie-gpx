@@ -11,7 +11,7 @@ software with a GUI.
 Another thing is splitting and cleaning GPX tracks. I want to be able to do it 
 visually but I always seem to end up manually editing the XML file (!)
 
-![screenshot](https://raw.github.com/kinverarity1/pyxie-gpx/master/examples/Screenshot from 2014-05-15 21:45:45.png)
+![screenshot](https://raw.githubusercontent.com/kinverarity1/pyxie-gpx/master/examples/screenshot_v0.2.png)
 
 For information on command-line arguments
 
